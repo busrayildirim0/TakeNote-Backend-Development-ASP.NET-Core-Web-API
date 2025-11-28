@@ -9,8 +9,9 @@ namespace TakeNote.Core.Entities
         public string Description { get; set; } = string.Empty;
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public Guid OwnerId { get; set; }
+        public bool IsPrivate { get; set; }
 
-        // Listeyi başlatıyoruz
         public ICollection<WorkspaceMember> Members { get; set; } = new List<WorkspaceMember>();
+        public ICollection<Note> Notes { get; set; } = new List<Note>();
     }
 }

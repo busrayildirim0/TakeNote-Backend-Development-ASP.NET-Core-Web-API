@@ -22,7 +22,7 @@
         public ICollection<Attachment> Attachments { get; set; } = new List<Attachment>();
         public ICollection<TaskItem> Tasks { get; set; } = new List<TaskItem>();
 
-        // Versiyon kontrolü (Concurrency - Bonus Puan) için
+        // Versiyon kontrolü (Concurrency) için
         public int Version { get; set; }
     }
 }
