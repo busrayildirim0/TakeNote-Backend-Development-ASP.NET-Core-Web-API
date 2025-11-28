@@ -1,13 +1,16 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer; 
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens; 
-using System.Text; 
 using Microsoft.OpenApi.Models; 
+using System.Text; 
+using TakeNote.API.Hubs;
+using TakeNote.Core.Entities;
 using TakeNote.Core.Interfaces;
 using TakeNote.DataAccess;
-using TakeNote.Service.Services; 
-using TakeNote.Service.Interfaces;
 using TakeNote.DataAccess.Repositories;
+using TakeNote.Service.Interfaces;
+using TakeNote.Service.Services;
+using Microsoft.AspNetCore.Identity;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,21 +23,27 @@ builder.Services.AddDbContext<AppDbContext>(options =>
             errorNumbersToAdd: null)
     ));
 
+// DbContext'ten hemen sonra:
+builder.Services.AddIdentity<User, IdentityRole<Guid>>()
+    .AddEntityFrameworkStores<AppDbContext>()
+    .AddDefaultTokenProviders();
+
 // Repository'ler 
-builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
 
 // Servisler 
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IWorkspaceService, WorkspaceService>();
+builder.Services.AddScoped<INoteService, NoteService>();
+builder.Services.AddScoped<ITaskItemService, TaskItemService>();
 
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
-
+builder.Services.AddSignalR();
 
 // 1. JWT AYARLARI (YENÝ EKLENECEK KISIM - BURADAN BAÞLA)
 //
@@ -104,5 +113,8 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 app.UseAuthentication(); 
 app.UseAuthorization();
+
+app.MapHub<CollaborationHub>("/hubs/collaboration"); 
 app.MapControllers();
+
 app.Run();
