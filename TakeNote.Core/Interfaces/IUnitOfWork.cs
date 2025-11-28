@@ -3,7 +3,6 @@
     public interface IUnitOfWork : IDisposable
     {
         
-        IUserRepository Users { get; }
         IWorkspaceRepository Workspaces { get; }
         INoteRepository Notes { get; }
         ITaskItemRepository TaskItems { get; }

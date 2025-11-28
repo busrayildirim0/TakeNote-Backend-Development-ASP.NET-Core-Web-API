@@ -1,6 +1,6 @@
 ﻿using Microsoft.AspNetCore.Mvc;
-using TakeNote.Service.Interfaces;
 using TakeNote.Service.DTOs;
+using TakeNote.Service.Interfaces;
 
 namespace TakeNote.API.Controllers
 {
@@ -9,10 +9,12 @@ namespace TakeNote.API.Controllers
     public class AuthController : ControllerBase
     {
         private readonly IAuthService _authService;
+        private readonly ILogger<AuthController> _logger; // Logger
 
-        public AuthController(IAuthService authService)
+        public AuthController(IAuthService authService, ILogger<AuthController> logger)
         {
             _authService = authService;
+            _logger = logger;
         }
 
         [HttpPost("register")]
@@ -25,6 +27,7 @@ namespace TakeNote.API.Controllers
             }
             catch (Exception ex)
             {
+                _logger.LogError(ex, "Registration error for {Email}", dto.Email); // Hata logu
                 return BadRequest(new { message = ex.Message });
             }
         }
@@ -39,6 +42,7 @@ namespace TakeNote.API.Controllers
             }
             catch (Exception ex)
             {
+                _logger.LogWarning(ex, "Login failed for {Email}", dto.Email); // Uyarı logu
                 return Unauthorized(new { message = ex.Message });
             }
         }

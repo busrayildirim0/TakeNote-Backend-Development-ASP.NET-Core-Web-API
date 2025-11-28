@@ -1,15 +1,13 @@
-﻿using System.Collections.Generic; // Bunu eklemeyi unutma
+﻿using Microsoft.AspNetCore.Identity;
 
 namespace TakeNote.Core.Entities
 {
-    public class User
+    // IdentityUser'dan miras alıyoruz (Id, Username, Email, PasswordHash otomatik geliyor)
+    public class User : IdentityUser<Guid>
     {
-        public Guid Id { get; set; }
-        public string Username { get; set; } = string.Empty;
-        public string Email { get; set; } = string.Empty;
-        public string PasswordHash { get; set; } = string.Empty;
-
+        // Ekstra istediğin özellik varsa buraya yazabilirsin (Örn: Ad Soyad)
         public ICollection<WorkspaceMember> Workspaces { get; set; } = new List<WorkspaceMember>();
-        public ICollection<UserRole> Roles { get; set; } = new List<UserRole>();
     }
+
+    // UserRole sınıfına gerek kalmayabilir, IdentityRole kullanacağız.
 }
