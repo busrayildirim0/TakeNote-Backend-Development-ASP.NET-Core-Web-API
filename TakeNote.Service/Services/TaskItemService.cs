@@ -17,8 +17,21 @@ namespace TakeNote.Service.Services
             _logger = logger;
         }
 
-        public async Task<TaskItemDto> CreateAsync(TaskItemCreateDto dto)
+        // CREATE: Görev eklerken Notun erişimini kontrol et
+        public async Task<TaskItemDto> CreateAsync(TaskItemCreateDto dto, Guid userId) // UserId ekledik
         {
+            // 1. Notu bul
+            var parentNote = await _unitOfWork.Notes.GetByIdAsync(dto.NoteId);
+            if (parentNote == null) throw new Exception("Note not found");
+
+            // 2. Not Kişisel mi? Erişim kontrolü
+            if (parentNote.WorkspaceId == null)
+            {
+                if (parentNote.CreatedById != userId)
+                    throw new UnauthorizedAccessException("Cannot add task to someone else's personal note.");
+            }
+            // Workspace notu ise, workspace üyeliği kontrol edilebilir.
+
             var task = new TaskItem
             {
                 NoteId = dto.NoteId,

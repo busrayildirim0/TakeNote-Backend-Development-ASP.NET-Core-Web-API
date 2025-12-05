@@ -9,9 +9,8 @@ namespace TakeNote.Service.DTOs
 
         public string Content { get; set; } = string.Empty;
 
-        [Required]
-        public int WorkspaceId { get; set; } // Not hangi çalışma alanında?
 
+        public int? WorkspaceId { get; set; }
         public bool IsPinned { get; set; } = false;
     }
 }

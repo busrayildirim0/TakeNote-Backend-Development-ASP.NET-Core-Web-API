@@ -12,7 +12,7 @@
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
         // Foreign Keys
-        public int WorkspaceId { get; set; }
+        public int? WorkspaceId { get; set; }
         public Workspace Workspace { get; set; } = null!;
 
         public Guid CreatedById { get; set; } // Notu oluşturan kullanıcı

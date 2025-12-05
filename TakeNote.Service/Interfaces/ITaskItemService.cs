@@ -4,7 +4,8 @@ namespace TakeNote.Service.Interfaces
 {
     public interface ITaskItemService
     {
-        Task<TaskItemDto> CreateAsync(TaskItemCreateDto dto);
+        // userId parametresini buraya da ekle
+        Task<TaskItemDto> CreateAsync(TaskItemCreateDto dto, Guid userId);
         Task ToggleCompleteAsync(int id);
         Task DeleteAsync(int id);
     }
