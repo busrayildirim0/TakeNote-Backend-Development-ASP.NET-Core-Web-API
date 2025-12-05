@@ -27,7 +27,7 @@ namespace TakeNote.API.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Registration error for {Email}", dto.Email); // Hata logu
+                _logger.LogError(ex, "Registration error for {Email}", dto.Email);
                 return BadRequest(new { message = ex.Message });
             }
         }
@@ -42,7 +42,7 @@ namespace TakeNote.API.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Login failed for {Email}", dto.Email); // Uyarı logu
+                _logger.LogWarning(ex, "Login failed for {Email}", dto.Email); 
                 return Unauthorized(new { message = ex.Message });
             }
         }

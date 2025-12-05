@@ -12,28 +12,19 @@ namespace TakeNote.API.Controllers
     public class WorkspaceController : ControllerBase
     {
         private readonly IWorkspaceService _workspaceService;
-        private readonly ILogger<WorkspaceController> _logger;
 
-        public WorkspaceController(IWorkspaceService workspaceService, ILogger<WorkspaceController> logger)
+        public WorkspaceController(IWorkspaceService workspaceService)
         {
             _workspaceService = workspaceService;
-            _logger = logger;
         }
 
-        // Helper: Token'dan User ID okuma
         private Guid GetUserId() => Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
 
-        [HttpPost]
-        public async Task<IActionResult> Create(WorkspaceCreateDto dto)
-        {
-            var result = await _workspaceService.CreateAsync(dto, GetUserId());
-            return Ok(result);
-        }
-
+        // GET: Hem benimkiler hem Public olanlar
         [HttpGet]
-        public async Task<IActionResult> GetMyWorkspaces()
+        public async Task<IActionResult> GetAll()
         {
-            var result = await _workspaceService.GetUserWorkspacesAsync(GetUserId());
+            var result = await _workspaceService.GetAvailableWorkspacesAsync(GetUserId());
             return Ok(result);
         }
 
@@ -47,6 +38,13 @@ namespace TakeNote.API.Controllers
             }
             catch (UnauthorizedAccessException) { return Forbid(); }
             catch (Exception ex) { return NotFound(new { message = ex.Message }); }
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> Create(WorkspaceCreateDto dto)
+        {
+            var result = await _workspaceService.CreateAsync(dto, GetUserId());
+            return Ok(result);
         }
 
         [HttpPut("{id}")]
@@ -70,7 +68,59 @@ namespace TakeNote.API.Controllers
                 return NoContent();
             }
             catch (UnauthorizedAccessException) { return Forbid(); }
-            catch (Exception) { return NotFound(); }
+        }
+
+        // --- YENİ ENDPOINTLER ---
+
+        // Admin Üye Ekler
+        [HttpPost("{id}/members")]
+        public async Task<IActionResult> AddMember(int id, [FromBody] AddMemberDto dto)
+        {
+            try
+            {
+                await _workspaceService.AddMemberAsync(id, dto, GetUserId());
+                return Ok(new { message = "Member added successfully" });
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (Exception ex) { return BadRequest(new { message = ex.Message }); }
+        }
+
+        // Admin Üye Çıkarır
+        [HttpDelete("{id}/members/{userId}")]
+        public async Task<IActionResult> RemoveMember(int id, Guid userId)
+        {
+            try
+            {
+                await _workspaceService.RemoveMemberAsync(id, userId, GetUserId());
+                return NoContent();
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); }
+            catch (Exception ex) { return BadRequest(new { message = ex.Message }); }
+        }
+
+        // Herkes Public Olana Katılır
+        [HttpPost("{id}/join")]
+        public async Task<IActionResult> Join(int id)
+        {
+            try
+            {
+                await _workspaceService.JoinAsync(id, GetUserId());
+                return Ok(new { message = "Joined workspace successfully" });
+            }
+            catch (UnauthorizedAccessException) { return Forbid(); } // Private ise 403
+            catch (Exception ex) { return BadRequest(new { message = ex.Message }); }
+        }
+
+        // Herkes Çıkabilir
+        [HttpPost("{id}/leave")]
+        public async Task<IActionResult> Leave(int id)
+        {
+            try
+            {
+                await _workspaceService.LeaveAsync(id, GetUserId());
+                return Ok(new { message = "Left workspace successfully" });
+            }
+            catch (Exception ex) { return BadRequest(new { message = ex.Message }); }
         }
     }
 }

@@ -24,38 +24,58 @@ namespace TakeNote.API.Controllers
             _hubContext = hubContext;
         }
 
+        // Helper: Token'dan User ID okuma (Kod tekrarını önlemek için)
+        private Guid GetUserId() => Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
+
         [HttpPost]
         public async Task<IActionResult> Create(NoteCreateDto dto)
         {
-            var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
+            var userId = GetUserId();
             var result = await _noteService.CreateAsync(dto, userId);
 
-            // Yeni not eklendiğini çalışma alanındakilere duyurabiliriz (Burada basitleştirildi)
+            // [FIX]: Sadece Ortak Not ise (WorkspaceId varsa) bildirim gönder.
+            // Kişisel notlar için gruba bildirim atılmaz.
+            if (dto.WorkspaceId.HasValue)
+            {
+                await _hubContext.Clients.Group($"workspace_{dto.WorkspaceId}")
+                    .SendAsync("ReceiveNewNote", result);
+            }
+
             return Ok(result);
         }
 
         [HttpGet("{id}")]
         public async Task<IActionResult> GetById(int id)
         {
-            var result = await _noteService.GetByIdAsync(id);
+            // Service'e userId gönderiyoruz ki yetki kontrolü yapabilsin
+            var result = await _noteService.GetByIdAsync(id, GetUserId());
+            return Ok(result);
+        }
+
+        [HttpGet("personal")]
+        public async Task<IActionResult> GetPersonalNotes()
+        {
+            var result = await _noteService.GetPersonalNotesAsync(GetUserId());
             return Ok(result);
         }
 
         [HttpGet("workspace/{workspaceId}")]
         public async Task<IActionResult> GetAllByWorkspace(int workspaceId)
         {
-            var result = await _noteService.GetAllByWorkspaceAsync(workspaceId);
+            // Duplicate metodu sildik, tek ve düzgün olan bu.
+            // Ayrıca userId gönderiyoruz.
+            var result = await _noteService.GetAllByWorkspaceAsync(workspaceId, GetUserId());
             return Ok(result);
         }
 
         [HttpPut("{id}")]
         public async Task<IActionResult> Update(int id, NoteUpdateDto dto)
         {
-            var userId = Guid.Parse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value!);
-            await _noteService.UpdateAsync(id, dto, userId);
+            await _noteService.UpdateAsync(id, dto, GetUserId());
 
-            // Bu notu izleyen herkese "Not Güncellendi" sinyali gönder
-            await _hubContext.Clients.Group(id.ToString()).SendAsync("ReceiveNoteUpdate", id, dto);
+            // Not güncellendiğinde, o notu izleyenlere (note_{id} grubuna) bildirim gider
+            await _hubContext.Clients.Group($"note_{id}")
+                .SendAsync("ReceiveNoteUpdate", id, dto);
 
             return NoContent();
         }
@@ -63,8 +83,12 @@ namespace TakeNote.API.Controllers
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(int id)
         {
-            await _noteService.DeleteAsync(id);
-            await _hubContext.Clients.Group(id.ToString()).SendAsync("ReceiveNoteDelete", id);
+            await _noteService.DeleteAsync(id, GetUserId());
+
+            // Silindi bilgisini gönder
+            await _hubContext.Clients.Group($"note_{id}")
+                .SendAsync("ReceiveNoteDelete", id);
+
             return NoContent();
         }
     }
