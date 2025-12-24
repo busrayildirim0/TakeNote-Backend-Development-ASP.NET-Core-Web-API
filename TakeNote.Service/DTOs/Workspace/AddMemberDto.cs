@@ -4,9 +4,13 @@ namespace TakeNote.Service.DTOs
 {
     public class AddMemberDto
     {
-        [Required]
-        public Guid UserId { get; set; } // Eklenecek kişinin ID'si
+        // GUID (Opsiyonel - eski sistem için)
+        public Guid UserId { get; set; } = Guid.Empty;
 
-        public string Role { get; set; } = "Viewer"; // Admin, Editor, Viewer
+        // Username VEYA Email
+        public string? UserIdentifier { get; set; }
+
+        [Required]
+        public string Role { get; set; } = "Viewer";
     }
 }

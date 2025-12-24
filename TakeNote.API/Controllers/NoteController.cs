@@ -91,5 +91,31 @@ namespace TakeNote.API.Controllers
 
             return NoContent();
         }
+
+
+        [HttpGet("personal/search")]
+        public async Task<IActionResult> SearchPersonalNotes(
+            [FromQuery] string? query,
+            [FromQuery] bool? pinnedOnly,
+            [FromQuery] DateTime? createdAfter,
+            [FromQuery] bool? assignedToMe)
+        {
+            var result = await _noteService.SearchNotesAsync(
+                GetUserId(), null, query, pinnedOnly, createdAfter, assignedToMe);
+            return Ok(result);
+        }
+
+        [HttpGet("workspace/{workspaceId}/search")]
+        public async Task<IActionResult> SearchWorkspaceNotes(
+            int workspaceId,
+            [FromQuery] string? query,
+            [FromQuery] bool? pinnedOnly,
+            [FromQuery] DateTime? createdAfter,
+            [FromQuery] bool? assignedToMe)
+        {
+            var result = await _noteService.SearchNotesAsync(
+                GetUserId(), workspaceId, query, pinnedOnly, createdAfter, assignedToMe);
+            return Ok(result);
+        }
     }
 }

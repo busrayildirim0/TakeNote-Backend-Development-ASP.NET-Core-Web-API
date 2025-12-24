@@ -1,9 +1,14 @@
-﻿namespace TakeNote.Core.Entities
+﻿// TakeNote.Core/Entities/TaskItem.cs
+namespace TakeNote.Core.Entities
 {
     public class TaskItem
     {
         public int Id { get; set; }
-        public string Description { get; set; } = string.Empty;
+
+        // YENİ: Description yerine Title (Frontend'deki gibi)
+        public string Title { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty; // Opsiyonel detay
+
         public bool IsCompleted { get; set; } = false;
         public DateTime? DueDate { get; set; }
 
@@ -11,7 +16,7 @@
         public int NoteId { get; set; }
         public Note Note { get; set; } = null!;
 
-        public Guid? AssignedToId { get; set; } // Kime atandı? (Opsiyonel)
+        public Guid? AssignedToId { get; set; }
         public User? AssignedTo { get; set; }
     }
 }

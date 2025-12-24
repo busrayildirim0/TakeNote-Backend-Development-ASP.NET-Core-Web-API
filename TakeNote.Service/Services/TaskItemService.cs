@@ -10,31 +10,29 @@ namespace TakeNote.Service.Services
     {
         private readonly IUnitOfWork _unitOfWork;
         private readonly ILogger<TaskItemService> _logger;
+        private readonly INotificationService _notificationService;
 
-        public TaskItemService(IUnitOfWork unitOfWork, ILogger<TaskItemService> logger)
+        public TaskItemService(IUnitOfWork unitOfWork, ILogger<TaskItemService> logger, INotificationService notificationService)
         {
             _unitOfWork = unitOfWork;
             _logger = logger;
+            _notificationService = notificationService;
         }
 
-        // CREATE: Görev eklerken Notun erişimini kontrol et
-        public async Task<TaskItemDto> CreateAsync(TaskItemCreateDto dto, Guid userId) // UserId ekledik
+        public async Task<TaskItemDto> CreateAsync(TaskItemCreateDto dto, Guid userId)
         {
-            // 1. Notu bul
             var parentNote = await _unitOfWork.Notes.GetByIdAsync(dto.NoteId);
             if (parentNote == null) throw new Exception("Note not found");
 
-            // 2. Not Kişisel mi? Erişim kontrolü
-            if (parentNote.WorkspaceId == null)
+            if (parentNote.WorkspaceId == null && parentNote.CreatedById != userId)
             {
-                if (parentNote.CreatedById != userId)
-                    throw new UnauthorizedAccessException("Cannot add task to someone else's personal note.");
+                throw new UnauthorizedAccessException("Cannot add task to someone else's personal note.");
             }
-            // Workspace notu ise, workspace üyeliği kontrol edilebilir.
 
             var task = new TaskItem
             {
                 NoteId = dto.NoteId,
+                Title = dto.Description, // ✅ TITLE EKLENDI
                 Description = dto.Description,
                 DueDate = dto.DueDate,
                 AssignedToId = dto.AssignedToId,
@@ -44,17 +42,11 @@ namespace TakeNote.Service.Services
             await _unitOfWork.TaskItems.AddAsync(task);
             await _unitOfWork.CompleteAsync();
 
-            _logger.LogInformation("Task {TaskId} added to Note {NoteId}", task.Id, dto.NoteId);
+            var taskDto = MapToDto(task);
+            await _notificationService.NotifyTaskAddedAsync(dto.NoteId, taskDto);
 
-            return new TaskItemDto
-            {
-                Id = task.Id,
-                NoteId = task.NoteId,
-                Description = task.Description,
-                IsCompleted = task.IsCompleted,
-                DueDate = task.DueDate,
-                AssignedToId = task.AssignedToId
-            };
+            _logger.LogInformation("Task {TaskId} added to Note {NoteId}", task.Id, dto.NoteId);
+            return taskDto;
         }
 
         public async Task ToggleCompleteAsync(int id)
@@ -65,6 +57,9 @@ namespace TakeNote.Service.Services
             task.IsCompleted = !task.IsCompleted;
             _unitOfWork.TaskItems.Update(task);
             await _unitOfWork.CompleteAsync();
+
+            var taskDto = MapToDto(task);
+            await _notificationService.NotifyTaskUpdatedAsync(task.NoteId, taskDto);
         }
 
         public async Task DeleteAsync(int id)
@@ -72,8 +67,25 @@ namespace TakeNote.Service.Services
             var task = await _unitOfWork.TaskItems.GetByIdAsync(id);
             if (task == null) return;
 
+            int noteId = task.NoteId;
             _unitOfWork.TaskItems.Delete(task);
             await _unitOfWork.CompleteAsync();
+
+            await _notificationService.NotifyTaskDeletedAsync(noteId, id);
+        }
+
+        private static TaskItemDto MapToDto(TaskItem task)
+        {
+            return new TaskItemDto
+            {
+                Id = task.Id,
+                NoteId = task.NoteId,
+                Title = task.Title, 
+                Description = task.Description,
+                IsCompleted = task.IsCompleted,
+                DueDate = task.DueDate,
+                AssignedToId = task.AssignedToId
+            };
         }
     }
 }

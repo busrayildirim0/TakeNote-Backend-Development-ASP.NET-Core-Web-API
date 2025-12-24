@@ -1,52 +1,59 @@
-using Microsoft.AspNetCore.Authentication.JwtBearer; 
+ï»¿using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Tokens; 
-using Microsoft.OpenApi.Models; 
-using System.Text; 
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
+using System.Text;
 using TakeNote.API.Hubs;
+using TakeNote.API.Services;
 using TakeNote.Core.Entities;
 using TakeNote.Core.Interfaces;
 using TakeNote.DataAccess;
 using TakeNote.DataAccess.Repositories;
 using TakeNote.Service.Interfaces;
 using TakeNote.Service.Services;
-using Microsoft.AspNetCore.Identity;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// 1. DATABASE
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(
         builder.Configuration.GetConnectionString("DefaultConnection"),
-        sqlOptions => sqlOptions.EnableRetryOnFailure(
-            maxRetryCount: 5, // 5 kere tekrar dene
-            maxRetryDelay: TimeSpan.FromSeconds(10), // Her deneme arasý 10 sn bekle
-            errorNumbersToAdd: null)
-    ));
+        sqlOptions => sqlOptions.EnableRetryOnFailure()));
 
-// DbContext'ten hemen sonra:
-builder.Services.AddIdentity<User, IdentityRole<Guid>>()
-    .AddEntityFrameworkStores<AppDbContext>()
-    .AddDefaultTokenProviders();
+// 2. IDENTITY
+builder.Services.AddIdentity<User, IdentityRole<Guid>>(options =>
+{
+    options.Password.RequireDigit = false;
+    options.Password.RequiredLength = 4;
+    options.Password.RequireNonAlphanumeric = false;
+    options.Password.RequireUppercase = false;
+    options.Password.RequireLowercase = false;
+})
+.AddEntityFrameworkStores<AppDbContext>()
+.AddDefaultTokenProviders();
 
-// Repository'ler 
+// 3. CORS (Frontend ayrÄ± Ã§alÄ±ÅŸacaÄŸÄ± iÃ§in Ã¶nemli)
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAll", builder =>
+        builder.SetIsOriginAllowed(_ => true) // TÃ¼m originlere izin ver
+               .AllowAnyMethod()
+               .AllowAnyHeader()
+               .AllowCredentials());
+});
+
+// 4. DEPENDENCY INJECTION
 builder.Services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
-
-// Servisler 
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IWorkspaceService, WorkspaceService>();
 builder.Services.AddScoped<INoteService, NoteService>();
 builder.Services.AddScoped<ITaskItemService, TaskItemService>();
-
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
+builder.Services.AddScoped<INotificationService, SignalRNotificationService>();
 
-builder.Services.AddControllers();
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
-builder.Services.AddSignalR();
-
-// 1. JWT AYARLARI (YENÝ EKLENECEK KISIM - BURADAN BAÞLA)
-//
+// 5. JWT Authentication
 var jwtSettings = builder.Configuration.GetSection("JwtSettings");
 var secretKey = Encoding.UTF8.GetBytes(jwtSettings["Secret"]!);
 
@@ -54,9 +61,12 @@ builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
     options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultScheme = JwtBearerDefaults.AuthenticationScheme;
 })
 .AddJwtBearer(options =>
 {
+    options.SaveToken = true;
+    options.RequireHttpsMetadata = false;
     options.TokenValidationParameters = new TokenValidationParameters
     {
         ValidateIssuer = true,
@@ -65,18 +75,40 @@ builder.Services.AddAuthentication(options =>
         ValidateIssuerSigningKey = true,
         ValidIssuer = jwtSettings["Issuer"],
         ValidAudience = jwtSettings["Audience"],
-        IssuerSigningKey = new SymmetricSecurityKey(secretKey)
+        IssuerSigningKey = new SymmetricSecurityKey(secretKey),
+        ClockSkew = TimeSpan.Zero
+    };
+
+    // SignalR Token Handling
+    options.Events = new JwtBearerEvents
+    {
+        OnMessageReceived = context =>
+        {
+            var accessToken = context.Request.Query["access_token"];
+            var path = context.HttpContext.Request.Path;
+            if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/collaborationHub"))
+            {
+                context.Token = accessToken;
+            }
+            return Task.CompletedTask;
+        }
     };
 });
-// (JWT AYARLARI BÝTÝÞ)
 
-// 2. SWAGGER'DA KÝLÝT SÝMGESÝNÝ AKTÝF ETMEK ÝÇÝN (OPSÝYONEL AMA TAVSÝYE EDÝLÝR)
+builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSignalR(options =>
+{
+    options.EnableDetailedErrors = true;
+});
+
+// Swagger Config
 builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "TakeNote API", Version = "v1" });
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
-        Description = "JWT Authorization header using the Bearer scheme. \r\n\r\n Enter 'Bearer' [space] and then your token in the text input below.\r\n\r\nExample: \"Bearer 12345abcdef\"",
+        Description = "JWT Authorization header using the Bearer scheme. Example: \"Bearer {token}\"",
         Name = "Authorization",
         In = ParameterLocation.Header,
         Type = SecuritySchemeType.ApiKey,
@@ -87,11 +119,7 @@ builder.Services.AddSwaggerGen(c =>
         {
             new OpenApiSecurityScheme
             {
-                Reference = new OpenApiReference
-                {
-                    Type = ReferenceType.SecurityScheme,
-                    Id = "Bearer"
-                },
+                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" },
                 Scheme = "oauth2",
                 Name = "Bearer",
                 In = ParameterLocation.Header,
@@ -103,18 +131,34 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+// --- HTTP REQUEST PIPELINE ---
+
+// Swagger her ortamda aÃ§Ä±k olsun (API testi iÃ§in)
+app.UseSwagger();
+app.UseSwaggerUI();
+
+// Ana sayfaya gelen isteÄŸi direkt Swagger'a yÃ¶nlendir
+app.MapGet("/", context =>
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+    context.Response.Redirect("/swagger/index.html");
+    return Task.CompletedTask;
+});
 
 app.UseHttpsRedirection();
-app.UseAuthentication(); 
+
+// Statik dosya sunumu (wwwroot) KALDIRILDI
+// app.UseDefaultFiles();
+// app.UseStaticFiles();
+
+app.UseCors("AllowAll");
+
+app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapHub<CollaborationHub>("/hubs/collaboration"); 
+app.MapHub<CollaborationHub>("/collaborationHub");
 app.MapControllers();
+
+// Fallback KALDIRILDI (SPA olmadÄ±ÄŸÄ± iÃ§in)
+// app.MapFallbackToFile("index.html");
 
 app.Run();

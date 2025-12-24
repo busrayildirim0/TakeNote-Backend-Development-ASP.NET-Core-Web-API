@@ -1,4 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿// TakeNote.Service/DTOs/Note/NoteCreateDto.cs - GÜNCELLENMİŞ
+using System.ComponentModel.DataAnnotations;
 
 namespace TakeNote.Service.DTOs
 {
@@ -6,11 +7,9 @@ namespace TakeNote.Service.DTOs
     {
         [Required]
         public string Title { get; set; } = string.Empty;
-
         public string Content { get; set; } = string.Empty;
-
-
         public int? WorkspaceId { get; set; }
         public bool IsPinned { get; set; } = false;
+        public List<string> Tags { get; set; } = new(); // YENİ
     }
 }

@@ -12,15 +12,21 @@ namespace TakeNote.Service.Services
         private readonly IUnitOfWork _unitOfWork;
         private readonly ILogger<WorkspaceService> _logger;
         private readonly UserManager<User> _userManager;
+        private readonly INotificationService _notificationService;
 
-        public WorkspaceService(IUnitOfWork unitOfWork, ILogger<WorkspaceService> logger, UserManager<User> userManager)
+        public WorkspaceService(
+            IUnitOfWork unitOfWork,
+            ILogger<WorkspaceService> logger,
+            UserManager<User> userManager,
+            INotificationService notificationService)
         {
             _unitOfWork = unitOfWork;
             _logger = logger;
             _userManager = userManager;
+            _notificationService = notificationService;
         }
 
-        // 1. CREATE: Oluşturan kişi otomatik ADMIN olur.
+        // CREATE
         public async Task<WorkspaceDto> CreateAsync(WorkspaceCreateDto dto, Guid userId)
         {
             _logger.LogInformation("Creating workspace '{Title}' for user {UserId}", dto.Title, userId);
@@ -34,7 +40,6 @@ namespace TakeNote.Service.Services
                 CreatedAt = DateTime.UtcNow,
                 Members = new List<WorkspaceMember>
                 {
-                    // [KURAL]: Oluşturan kişi Admin'dir.
                     new WorkspaceMember { UserId = userId, Role = "Admin", JoinedAt = DateTime.UtcNow }
                 }
             };
@@ -45,89 +50,91 @@ namespace TakeNote.Service.Services
             return MapToDto(workspace);
         }
 
-        // 2. GET BY ID: Private ise sadece üyeler görebilir. Public ise herkes görebilir.
+        // GET BY ID
         public async Task<WorkspaceDto> GetByIdAsync(int id, Guid userId)
         {
             var workspace = await _unitOfWork.Workspaces.GetByIdAsync(id);
             if (workspace == null) throw new Exception("Workspace not found");
 
-            // Erişim Kontrolü:
-            // Eğer Public ise -> Girebilir.
-            // Eğer Private ise -> Sahibi VEYA Üyesi olmalı.
-
-            // Not: Generic Repository 'Include(Members)' yapmadığı için üyeliği 'Members' listesinden
-            // kontrol edemeyebiliriz (Lazy Loading kapalıysa). Bu yüzden şimdilik Owner kontrolü ve
-            // Public kontrolü yapıyoruz. Üyelik kontrolü için repo'ya özel metod yazmak en iyisidir.
-            // Ancak EF Core predicate mantığıyla şöyle bir kontrol yapabiliriz:
-
-            bool isMember = workspace.OwnerId == userId; // (Basitleştirilmiş kontrol)
-            // Eğer tam üyelik kontrolü gerekirse Repo'ya 'IsMember(workspaceId, userId)' metodu eklenmeli.
+            bool isMember = workspace.OwnerId == userId ||
+                (await _unitOfWork.Workspaces.ListAsync(w => w.Id == id && w.Members.Any(m => m.UserId == userId))).Any();
 
             if (workspace.IsPrivate && !isMember)
-            {
-                // Private ve sahibi değilse hata ver (Üyelik kontrolü eklendiğinde burası güncellenmeli)
                 throw new UnauthorizedAccessException("You do not have access to this private workspace.");
-            }
 
             return MapToDto(workspace);
         }
 
-        // 3. GET ALL: Public olanlar + Benimkiler (Üye olduklarım)
+        // GET AVAILABLE
         public async Task<IEnumerable<WorkspaceDto>> GetAvailableWorkspacesAsync(Guid userId)
         {
-            // Predicate: (Public olsun) VEYA (Sahibi ben olayım) VEYA (Üyesi olayım)
             var workspaces = await _unitOfWork.Workspaces.ListAsync(w =>
-                !w.IsPrivate ||
-                w.OwnerId == userId ||
-                w.Members.Any(m => m.UserId == userId)
-            );
-
+                w.OwnerId == userId || w.Members.Any(m => m.UserId == userId));
             return workspaces.Select(MapToDto);
         }
 
-        // 4. ADD MEMBER: Sadece ADMIN (Owner) ekleyebilir.
+        // GET PUBLIC (Üye olmayanlar için)
+        public async Task<IEnumerable<WorkspaceDto>> GetPublicWorkspacesAsync(Guid userId)
+        {
+            var allPublic = await _unitOfWork.Workspaces.ListAsync(w => !w.IsPrivate);
+            var result = new List<WorkspaceDto>();
+
+            foreach (var workspace in allPublic)
+            {
+                if (workspace.OwnerId != userId)
+                {
+                    var isMember = (await _unitOfWork.Workspaces.ListAsync(w =>
+                        w.Id == workspace.Id && w.Members.Any(m => m.UserId == userId))).Any();
+
+                    if (!isMember) result.Add(MapToDto(workspace));
+                }
+            }
+            return result;
+        }
+
+        // ADD MEMBER - USERNAME/EMAIL İLE
         public async Task AddMemberAsync(int workspaceId, AddMemberDto dto, Guid currentUserId)
         {
-            var workspace = await _unitOfWork.Workspaces.GetByIdAsync(workspaceId);
+            var workspace = await _unitOfWork.Workspaces.GetByIdWithMembersAsync(workspaceId);
             if (workspace == null) throw new Exception("Workspace not found");
 
-            // 1. YETKİ KONTROLÜ: Sadece Owner üye ekleyebilir
             if (workspace.OwnerId != currentUserId)
-            {
                 throw new UnauthorizedAccessException("Only the workspace admin can add members.");
+
+            // USERNAME veya EMAIL İLE KULLANICI BUL
+            User? userToAdd = null;
+
+            // Önce userId varsa direkt bul
+            if (dto.UserId != Guid.Empty)
+            {
+                userToAdd = await _userManager.FindByIdAsync(dto.UserId.ToString());
+            }
+            // Yoksa UserIdentifier'a bak (Username veya Email olabilir)
+            else if (!string.IsNullOrEmpty(dto.UserIdentifier))
+            {
+                // Email formatında mı kontrol et
+                if (dto.UserIdentifier.Contains("@"))
+                {
+                    userToAdd = await _userManager.FindByEmailAsync(dto.UserIdentifier);
+                }
+                else
+                {
+                    userToAdd = await _userManager.FindByNameAsync(dto.UserIdentifier);
+                }
             }
 
-            // 2. KULLANICI VAR MI?
-            var userToAdd = await _userManager.FindByIdAsync(dto.UserId.ToString());
-            if (userToAdd == null) throw new Exception("User to add not found");
+            if (userToAdd == null)
+                throw new Exception("Kullanıcı bulunamadı. Lütfen doğru username veya email giriniz.");
 
-            // 3. ZATEN ÜYE Mİ? (HATA BURADAN KAYNAKLANIYOR OLABİLİR)
-            // Veritabanına soruyoruz: Bu ID'ye sahip workspace'in içinde, bu User var mı?
-            // Not: Repository yapına göre Members include edilmemiş olabilir, bu yüzden 
-            // garanti yöntem olan ListAsync ile veritabanından sorguluyoruz.
-            var isAlreadyMember = (await _unitOfWork.Workspaces.ListAsync(w =>
-                w.Id == workspaceId &&
-                w.Members.Any(m => m.UserId == dto.UserId))).Any();
-
+            // Zaten üye mi?
+            var isAlreadyMember = workspace.Members.Any(m => m.UserId == userToAdd.Id) || workspace.OwnerId == userToAdd.Id;
             if (isAlreadyMember)
-            {
-                // Hata fırlatmak yerine loglayıp return diyebilirsin veya kullanıcıya söyleyebilirsin.
-                throw new Exception("This user is already a member of the workspace.");
-            }
+                throw new Exception("Bu kullanıcı zaten alan üyesi.");
 
-            // Kendini eklemeye çalışıyorsa (Owner zaten doğal üyedir)
-            if (workspace.OwnerId == dto.UserId)
-            {
-                throw new Exception("Owner is already a member.");
-            }
-
-            // 4. EKLEME İŞLEMİ
-            // Eğer workspace.Members null gelmişse (Include yapılmadıysa) initialize et
-            if (workspace.Members == null) workspace.Members = new List<WorkspaceMember>();
-
+            // Ekle
             workspace.Members.Add(new WorkspaceMember
             {
-                UserId = dto.UserId,
+                UserId = userToAdd.Id,
                 WorkspaceId = workspaceId,
                 Role = dto.Role ?? "Viewer",
                 JoinedAt = DateTime.UtcNow
@@ -136,81 +143,82 @@ namespace TakeNote.Service.Services
             _unitOfWork.Workspaces.Update(workspace);
             await _unitOfWork.CompleteAsync();
 
-            _logger.LogInformation("User {NewUserId} added to workspace {WsId}", dto.UserId, workspaceId);
+            await _notificationService.NotifyMemberAddedAsync(workspaceId, userToAdd.Id);
+            _logger.LogInformation("User {NewUserId} added to workspace {WsId}", userToAdd.Id, workspaceId);
         }
-        // 5. REMOVE MEMBER: Sadece ADMIN (Owner) çıkarabilir.
+
+        // REMOVE MEMBER
         public async Task RemoveMemberAsync(int workspaceId, Guid memberIdToRemove, Guid currentUserId)
         {
-            var workspace = await _unitOfWork.Workspaces.GetByIdAsync(workspaceId);
+            var workspace = await _unitOfWork.Workspaces.GetByIdWithMembersAsync(workspaceId);
             if (workspace == null) throw new Exception("Workspace not found");
 
-            // [KURAL]: Sadece Admin (Owner) başkasını atabilir.
             if (workspace.OwnerId != currentUserId)
-            {
                 throw new UnauthorizedAccessException("Only the workspace admin can remove members.");
-            }
 
-            // Kendini atmaya çalışıyorsa (Leave kullanmalı)
             if (memberIdToRemove == currentUserId)
-            {
-                throw new Exception("You cannot remove yourself via this method. Use 'Leave' instead.");
-            }
+                throw new Exception("You cannot remove yourself. Use 'Leave' instead.");
 
-            // Silme işlemi için DbContext'e veya Member listesine erişim lazım.
-            // Şimdilik dolaylı yoldan yapıyoruz. Doğrusu: _unitOfWork.WorkspaceMembers.Delete(...)
-            // Ancak WorkspaceMembers repo'muz olmadığı için, Workspace üzerinden gidiyoruz:
+            var member = workspace.Members.FirstOrDefault(m => m.UserId == memberIdToRemove);
+            if (member == null) throw new Exception("Member not found in workspace");
 
-            // Not: Bu işlem için workspace.Members dolu gelmeli (Include). Eğer gelmezse repo'ya özel metod şart.
-            // Hızlı çözüm: Doğrudan SQL veya Repo metodu. Biz burada varsayımsal ilerliyoruz.
-            // *En sağlıklısı: IWorkspaceRepository'ye 'RemoveMember' metodu eklemektir.*
+            workspace.Members.Remove(member);
+            _unitOfWork.Workspaces.Update(workspace);
+            await _unitOfWork.CompleteAsync();
 
-            _logger.LogInformation("Admin {AdminId} removed user {MemberId} from workspace {WsId}", currentUserId, memberIdToRemove, workspaceId);
-            await Task.CompletedTask; // (Buraya gerçek silme kodu Repo güncellemesiyle gelmeli)
+            _logger.LogInformation("User {MemberId} removed from workspace {WsId}", memberIdToRemove, workspaceId);
         }
 
-        // 6. JOIN: Public ise herkes girebilir.
+        // JOIN
         public async Task JoinAsync(int workspaceId, Guid userId)
         {
-            var workspace = await _unitOfWork.Workspaces.GetByIdAsync(workspaceId);
+            var workspace = await _unitOfWork.Workspaces.GetByIdWithMembersAsync(workspaceId);
             if (workspace == null) throw new Exception("Workspace not found");
 
-            // [KURAL]: Private ise kafasına göre giremez.
             if (workspace.IsPrivate)
-            {
-                throw new UnauthorizedAccessException("Cannot join a private workspace. You must be added by an admin.");
-            }
+                throw new UnauthorizedAccessException("Cannot join a private workspace without invitation.");
 
-            // Ekleme
-            if (workspace.Members == null) workspace.Members = new List<WorkspaceMember>();
+            if (workspace.OwnerId == userId)
+                throw new Exception("You are already the owner of this workspace.");
+
+            var isMember = workspace.Members.Any(m => m.UserId == userId);
+            if (isMember) throw new Exception("You are already a member of this workspace.");
 
             workspace.Members.Add(new WorkspaceMember
             {
                 UserId = userId,
                 WorkspaceId = workspaceId,
-                Role = "Viewer", // Varsayılan rol
+                Role = "Viewer",
                 JoinedAt = DateTime.UtcNow
             });
 
             _unitOfWork.Workspaces.Update(workspace);
             await _unitOfWork.CompleteAsync();
+
+            await _notificationService.NotifyMemberAddedAsync(workspaceId, userId);
+            _logger.LogInformation("User {UserId} joined workspace {WorkspaceId}", userId, workspaceId);
         }
 
-        // 7. LEAVE: Herkes çıkabilir.
+        // LEAVE
         public async Task LeaveAsync(int workspaceId, Guid userId)
         {
-            var workspace = await _unitOfWork.Workspaces.GetByIdAsync(workspaceId);
+            var workspace = await _unitOfWork.Workspaces.GetByIdWithMembersAsync(workspaceId);
             if (workspace == null) throw new Exception("Workspace not found");
 
             if (workspace.OwnerId == userId)
-            {
-                throw new Exception("Owner cannot leave the workspace. Delete it instead.");
-            }
+                throw new Exception("Owner cannot leave. Delete workspace instead.");
 
-            // Üyelikten çıkma mantığı (Repo desteği gerektirir)
+            var member = workspace.Members.FirstOrDefault(m => m.UserId == userId);
+            if (member == null) throw new Exception("You are not a member of this workspace");
+
+            workspace.Members.Remove(member);
+            _unitOfWork.Workspaces.Update(workspace);
+            await _unitOfWork.CompleteAsync();
+
             _logger.LogInformation("User {UserId} left workspace {WsId}", userId, workspaceId);
-            await Task.CompletedTask;
         }
 
+        // UPDATE
         public async Task UpdateAsync(int id, WorkspaceUpdateDto dto, Guid userId)
         {
             var workspace = await _unitOfWork.Workspaces.GetByIdAsync(id);
@@ -221,11 +229,15 @@ namespace TakeNote.Service.Services
 
             if (dto.Title != null) workspace.Title = dto.Title;
             if (dto.Description != null) workspace.Description = dto.Description;
+            if (dto.IsPrivate.HasValue) workspace.IsPrivate = dto.IsPrivate.Value;
 
             _unitOfWork.Workspaces.Update(workspace);
             await _unitOfWork.CompleteAsync();
+
+            _logger.LogInformation("Workspace updated: {WorkspaceId}", id);
         }
 
+        // DELETE
         public async Task DeleteAsync(int id, Guid userId)
         {
             var workspace = await _unitOfWork.Workspaces.GetByIdAsync(id);
@@ -236,6 +248,60 @@ namespace TakeNote.Service.Services
 
             _unitOfWork.Workspaces.Delete(workspace);
             await _unitOfWork.CompleteAsync();
+        }
+
+        // GET MEMBERS
+        public async Task<IEnumerable<WorkspaceMemberDto>> GetMembersAsync(int workspaceId, Guid userId)
+        {
+            var workspace = await _unitOfWork.Workspaces.GetByIdWithMembersAsync(workspaceId);
+            if (workspace == null) throw new Exception("Workspace not found");
+
+            bool isMember = workspace.OwnerId == userId || workspace.Members.Any(m => m.UserId == userId);
+            if (workspace.IsPrivate && !isMember)
+                throw new UnauthorizedAccessException("Access denied");
+
+            var membersList = new List<WorkspaceMemberDto>();
+
+            // Owner ekle
+            var owner = await _userManager.FindByIdAsync(workspace.OwnerId.ToString());
+            if (owner != null)
+            {
+                membersList.Add(new WorkspaceMemberDto
+                {
+                    UserId = workspace.OwnerId,
+                    Username = owner.UserName ?? "Unknown",
+                    Email = owner.Email ?? "",
+                    Role = "Admin",
+                    JoinedAt = workspace.CreatedAt
+                });
+            }
+
+            // Diğer üyeler
+            foreach (var member in workspace.Members.Where(m => m.UserId != workspace.OwnerId))
+            {
+                membersList.Add(new WorkspaceMemberDto
+                {
+                    UserId = member.UserId,
+                    Username = member.User.UserName ?? "Unknown",
+                    Email = member.User.Email ?? "",
+                    Role = member.Role,
+                    JoinedAt = member.JoinedAt
+                });
+            }
+
+            return membersList;
+        }
+
+        // GET USER ROLE
+        public async Task<string> GetUserRoleAsync(int workspaceId, Guid userId)
+        {
+            var workspace = await _unitOfWork.Workspaces.GetByIdWithMembersAsync(workspaceId);
+            if (workspace == null) throw new Exception("Workspace not found");
+
+            if (workspace.OwnerId == userId) return "Admin";
+
+            var member = workspace.Members.FirstOrDefault(m => m.UserId == userId);
+            return member?.Role ?? "None";
         }
 
         private static WorkspaceDto MapToDto(Workspace w)

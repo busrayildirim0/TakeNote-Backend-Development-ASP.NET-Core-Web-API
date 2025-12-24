@@ -13,7 +13,7 @@ namespace TakeNote.DataAccess.Repositories
         public async Task<Note?> GetByIdWithRelationsAsync(int id)
         {
             return await _context.Notes
-                .Include(n => n.Attachments)
+                // .Include(n => n.Attachments) ❌ BU SATIR SİLİNDİ
                 .Include(n => n.Tasks)
                 .Include(n => n.CreatedBy)
                 .FirstOrDefaultAsync(n => n.Id == id);
