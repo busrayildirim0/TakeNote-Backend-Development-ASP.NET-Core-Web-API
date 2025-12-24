@@ -10,44 +10,31 @@ namespace TakeNote.Service.Services
     {
         private readonly IUnitOfWork _unitOfWork;
         private readonly ILogger<NoteService> _logger;
+        private readonly INotificationService _notificationService;
 
-        public NoteService(IUnitOfWork unitOfWork, ILogger<NoteService> logger)
+        public NoteService(
+            IUnitOfWork unitOfWork,
+            ILogger<NoteService> logger,
+            INotificationService notificationService)
         {
             _unitOfWork = unitOfWork;
             _logger = logger;
+            _notificationService = notificationService;
         }
 
-        // CREATE: Not Oluşturma
+        // CREATE
         public async Task<NoteDto> CreateAsync(NoteCreateDto dto, Guid userId)
         {
-            // SENARYO 1: Ortak Not (WorkspaceId DOLU ise)
             if (dto.WorkspaceId.HasValue)
             {
-                var workspace = await _unitOfWork.Workspaces.GetByIdAsync(dto.WorkspaceId.Value);
+                var workspace = await _unitOfWork.Workspaces.GetByIdWithMembersAsync(dto.WorkspaceId.Value);
                 if (workspace == null) throw new Exception("Workspace not found");
 
-                // [GERÇEK KONTROL]: Kullanıcı bu workspace'in sahibi mi veya üyesi mi?
-                // Not: Generic Repository 'GetByIdAsync' metodu 'Members' listesini Include etmeyebilir.
-                // Bu yüzden garanti olsun diye veritabanından üyeliği sorguluyoruz.
-
-                // Eğer workspace sahibi ise sorun yok. Değilse üye listesine bak.
-                if (workspace.OwnerId != userId)
-                {
-                    // WorkspaceMember tablosuna erişmek için Workspace üzerinden gidiyoruz.
-                    // (EF Core ile 'Members' yüklü gelmediyse diye güvenli kontrol)
-                    var userWorkspaces = await _unitOfWork.Workspaces.ListAsync(w =>
-                        w.Id == dto.WorkspaceId.Value &&
-                        w.Members.Any(m => m.UserId == userId));
-
-                    if (!userWorkspaces.Any())
-                    {
-                        _logger.LogWarning("User {UserId} tried to create note in Workspace {WsId} without membership.", userId, dto.WorkspaceId);
-                        throw new UnauthorizedAccessException("You must be a member of the workspace to create a note there.");
-                    }
-                }
+                // ROL KONTROLÜ: Admin veya Editor NOT EKLEYEBİLİR
+                var userRole = await GetUserRoleInWorkspace(workspace, userId);
+                if (userRole != "Admin" && userRole != "Editor")
+                    throw new UnauthorizedAccessException("Sadece Admin ve Editor not ekleyebilir.");
             }
-
-            // SENARYO 2: Kişisel Not (WorkspaceId BOŞ ise) -> Kontrolsüz devam.
 
             var note = new Note
             {
@@ -56,186 +43,272 @@ namespace TakeNote.Service.Services
                 WorkspaceId = dto.WorkspaceId,
                 CreatedById = userId,
                 CreatedAt = DateTime.UtcNow,
-                IsPinned = dto.IsPinned
+                UpdatedAt = DateTime.UtcNow,
+                IsPinned = dto.IsPinned,
+                Tags = dto.Tags ?? new List<string>()
             };
 
             await _unitOfWork.Notes.AddAsync(note);
             await _unitOfWork.CompleteAsync();
 
-            return MapToDto(note);
+            var createdNoteDto = await MapToDtoWithUsername(note);
+
+            if (dto.WorkspaceId.HasValue)
+            {
+                await _notificationService.NotifyNoteCreatedAsync(dto.WorkspaceId.Value, createdNoteDto);
+            }
+
+            _logger.LogInformation("Note created. ID: {NoteId}", note.Id);
+            return createdNoteDto;
         }
 
-        // GET BY ID: Tekil Not Getirme
+        // GET BY ID
         public async Task<NoteDto> GetByIdAsync(int id, Guid userId)
         {
             var note = await _unitOfWork.Notes.GetByIdWithRelationsAsync(id);
             if (note == null) throw new Exception("Note not found");
 
-            // ERİŞİM KONTROLÜ
-            bool hasAccess = false;
+            bool hasAccess = await CheckNoteAccess(note, userId);
+            if (!hasAccess) throw new UnauthorizedAccessException("Permission denied.");
 
-            if (note.WorkspaceId == null)
-            {
-                // 1. Kişisel Not: Sadece sahibi görebilir
-                if (note.CreatedById == userId) hasAccess = true;
-            }
-            else
-            {
-                // 2. Ortak Not: Sahibi veya Üyeler görebilir
-                var workspace = await _unitOfWork.Workspaces.GetByIdAsync(note.WorkspaceId.Value);
-
-                if (workspace != null)
-                {
-                    if (workspace.OwnerId == userId)
-                    {
-                        hasAccess = true;
-                    }
-                    else
-                    {
-                        // Üyelik kontrolü (Veritabanından teyitli)
-                        var isMember = (await _unitOfWork.Workspaces.ListAsync(w =>
-                            w.Id == workspace.Id &&
-                            w.Members.Any(m => m.UserId == userId))).Any();
-
-                        if (isMember) hasAccess = true;
-                    }
-                }
-            }
-
-            if (!hasAccess)
-            {
-                _logger.LogWarning("Unauthorized access attempt to Note {NoteId} by User {UserId}", id, userId);
-                throw new UnauthorizedAccessException("You do not have permission to view this note.");
-            }
-
-            return MapToDto(note);
+            return await MapToDtoWithUsername(note);
         }
 
-        // GET PERSONAL: Kişisel Notlar
+        // GET PERSONAL NOTES
         public async Task<IEnumerable<NoteDto>> GetPersonalNotesAsync(Guid userId)
         {
-            var notes = await _unitOfWork.Notes.ListAsync(n => n.CreatedById == userId && n.WorkspaceId == null);
-            return notes.Select(MapToDto);
+            var notes = await _unitOfWork.Notes.ListAsync(n =>
+                n.CreatedById == userId && n.WorkspaceId == null);
+
+            return await MapToDtoListWithUsername(notes);
         }
 
-        // GET WORKSPACE: Ortak Notlar
+        // GET WORKSPACE NOTES
         public async Task<IEnumerable<NoteDto>> GetAllByWorkspaceAsync(int workspaceId, Guid userId)
         {
-            var workspace = await _unitOfWork.Workspaces.GetByIdAsync(workspaceId);
+            var workspace = await _unitOfWork.Workspaces.GetByIdWithMembersAsync(workspaceId);
             if (workspace == null) throw new Exception("Workspace not found");
 
-            // ERİŞİM KONTROLÜ: Private workspace ise ve üye değilse hata ver
+            // ERIŞIM KONTROLÜ
             if (workspace.IsPrivate && workspace.OwnerId != userId)
             {
-                var isMember = (await _unitOfWork.Workspaces.ListAsync(w =>
-                    w.Id == workspaceId &&
-                    w.Members.Any(m => m.UserId == userId))).Any();
-
-                if (!isMember)
-                {
-                    throw new UnauthorizedAccessException("You cannot access notes of a private workspace you are not a member of.");
-                }
+                var isMember = workspace.Members.Any(m => m.UserId == userId);
+                if (!isMember) throw new UnauthorizedAccessException("Access denied.");
             }
 
-            var notes = await _unitOfWork.Notes.GetNotesByWorkspaceAsync(workspaceId);
-            return notes.Select(MapToDto);
+            var notes = await _unitOfWork.Notes.ListAsync(n => n.WorkspaceId == workspaceId);
+            return await MapToDtoListWithUsername(notes);
         }
 
-        // UPDATE: Güncelleme
+        // UPDATE
         public async Task UpdateAsync(int id, NoteUpdateDto dto, Guid userId)
         {
-            var note = await _unitOfWork.Notes.GetByIdAsync(id);
+            var note = await _unitOfWork.Notes.GetByIdWithRelationsAsync(id);
             if (note == null) throw new Exception("Note not found");
 
-            // YETKİ KONTROLÜ
-            if (note.WorkspaceId == null)
-            {
-                // KİŞİSEL NOT: Sadece sahibi güncelleyebilir
-                if (note.CreatedById != userId)
-                    throw new UnauthorizedAccessException("You cannot edit someone else's personal note.");
-            }
-            else
-            {
-                // ORTAK NOT: Sahibi VEYA Workspace Üyeleri güncelleyebilir
-                // Önce Workspace'i bulalım
-                var workspace = await _unitOfWork.Workspaces.GetByIdAsync(note.WorkspaceId.Value);
-                if (workspace == null) throw new Exception("Workspace not found");
-
-                bool canEdit = false;
-                if (workspace.OwnerId == userId) canEdit = true; // Admin her şeyi düzenler
-                else if (note.CreatedById == userId) canEdit = true; // Oluşturan düzenler
-                else
-                {
-                    // Üye mi? (Üye ise düzenleyebilir - İşbirliği Modu)
-                    var isMember = (await _unitOfWork.Workspaces.ListAsync(w =>
-                        w.Id == workspace.Id &&
-                        w.Members.Any(m => m.UserId == userId))).Any();
-
-                    if (isMember) canEdit = true;
-                }
-
-                if (!canEdit) throw new UnauthorizedAccessException("You do not have permission to edit this note.");
-            }
+            // ROL BAZLI YETKİ KONTROLÜ
+            bool canEdit = await CheckNoteEditPermission(note, userId);
+            if (!canEdit) throw new UnauthorizedAccessException("Bu notu düzenleyemezsiniz.");
 
             if (dto.Title != null) note.Title = dto.Title;
             if (dto.Content != null) note.Content = dto.Content;
             if (dto.IsPinned.HasValue) note.IsPinned = dto.IsPinned.Value;
             if (dto.IsLocked.HasValue) note.IsLocked = dto.IsLocked.Value;
+            if (dto.Tags != null) note.Tags = dto.Tags;
+
+            // Görevleri güncelle
+            if (dto.Tasks != null)
+            {
+                note.Tasks.Clear();
+                foreach (var taskDto in dto.Tasks)
+                {
+                    note.Tasks.Add(new TaskItem
+                    {
+                        Title = taskDto.Title,
+                        Description = taskDto.Description,
+                        IsCompleted = taskDto.IsCompleted,
+                        DueDate = taskDto.DueDate,
+                        AssignedToId = taskDto.AssignedToId
+                    });
+                }
+            }
 
             note.UpdatedAt = DateTime.UtcNow;
-
             _unitOfWork.Notes.Update(note);
             await _unitOfWork.CompleteAsync();
 
-            _logger.LogInformation("Note {NoteId} updated by {UserId}.", id, userId);
+            await _notificationService.NotifyNoteUpdatedAsync(id, id, dto);
+            _logger.LogInformation("Note updated: {NoteId}", id);
         }
 
-        // DELETE: Silme
+        // DELETE - DOĞRUDAN SİLİNİYOR (ÇÖP KUTUSU YOK)
         public async Task DeleteAsync(int id, Guid userId)
         {
             var note = await _unitOfWork.Notes.GetByIdAsync(id);
             if (note == null) return;
 
-            if (note.WorkspaceId == null)
-            {
-                // KİŞİSEL NOT: Sadece sahibi silebilir
-                if (note.CreatedById != userId)
-                    throw new UnauthorizedAccessException("You cannot delete someone else's personal note.");
-            }
-            else
-            {
-                // ORTAK NOT: Sadece Sahibi VEYA Workspace Admini silebilir
-                var workspace = await _unitOfWork.Workspaces.GetByIdAsync(note.WorkspaceId.Value);
-                if (workspace == null) return; // Workspace yoksa not da yetim kalmıştır, silinebilir belki ama güvenli duralım.
-
-                bool canDelete = false;
-                if (note.CreatedById == userId) canDelete = true; // Kendi notumu silerim
-                if (workspace.OwnerId == userId) canDelete = true; // Adminsem herkesinkini silerim
-
-                if (!canDelete)
-                {
-                    throw new UnauthorizedAccessException("Only the creator or workspace admin can delete this note.");
-                }
-            }
+            // YETKİ KONTROLÜ
+            bool canDelete = await CheckNoteDeletePermission(note, userId);
+            if (!canDelete) throw new UnauthorizedAccessException("Bu notu silemezsiniz.");
 
             _unitOfWork.Notes.Delete(note);
             await _unitOfWork.CompleteAsync();
-            _logger.LogInformation("Note {NoteId} deleted by {UserId}.", id, userId);
+
+            await _notificationService.NotifyNoteDeletedAsync(id);
+            _logger.LogInformation("Note {NoteId} permanently deleted by {UserId}.", id, userId);
         }
 
-        private static NoteDto MapToDto(Note note)
+        // SEARCH - GELİŞTİRİLMİŞ FİLTRELEME
+        public async Task<IEnumerable<NoteDto>> SearchNotesAsync(
+            Guid userId,
+            int? workspaceId,
+            string? query,
+            bool? pinnedOnly,
+            DateTime? createdAfter,
+            bool? assignedToMe)
         {
+            IEnumerable<Note> notes;
+
+            if (workspaceId.HasValue)
+            {
+                notes = await _unitOfWork.Notes.ListAsync(n => n.WorkspaceId == workspaceId);
+            }
+            else
+            {
+                notes = await _unitOfWork.Notes.ListAsync(n =>
+                    n.CreatedById == userId && n.WorkspaceId == null);
+            }
+
+            // ARAMA
+            if (!string.IsNullOrEmpty(query))
+            {
+                query = query.ToLower();
+                notes = notes.Where(n =>
+                    n.Title.ToLower().Contains(query) ||
+                    n.Content.ToLower().Contains(query) ||
+                    n.Tags.Any(t => t.ToLower().Contains(query)));
+            }
+
+            // PİNLİ NOTLAR
+            if (pinnedOnly == true)
+            {
+                notes = notes.Where(n => n.IsPinned);
+            }
+
+            // TARİH FİLTRESİ
+            if (createdAfter.HasValue)
+            {
+                notes = notes.Where(n => n.CreatedAt >= createdAfter.Value);
+            }
+
+            // BANA ATANANLAR
+            if (assignedToMe == true)
+            {
+                notes = notes.Where(n => n.Tasks.Any(t => t.AssignedToId == userId));
+            }
+
+            return await MapToDtoListWithUsername(notes);
+        }
+
+        // HELPER: ERIŞIM KONTROLÜ
+        private async Task<bool> CheckNoteAccess(Note note, Guid userId)
+        {
+            if (note.WorkspaceId == null)
+            {
+                return note.CreatedById == userId;
+            }
+
+            var workspace = await _unitOfWork.Workspaces.GetByIdWithMembersAsync(note.WorkspaceId.Value);
+            if (workspace == null) return false;
+
+            if (workspace.OwnerId == userId) return true;
+
+            var isMember = workspace.Members.Any(m => m.UserId == userId);
+            return isMember;
+        }
+
+        // HELPER: DÜZENLEME YETKİSİ (Admin, Editor veya Yaratıcı)
+        private async Task<bool> CheckNoteEditPermission(Note note, Guid userId)
+        {
+            if (note.WorkspaceId == null)
+            {
+                return note.CreatedById == userId;
+            }
+
+            var workspace = await _unitOfWork.Workspaces.GetByIdWithMembersAsync(note.WorkspaceId.Value);
+            if (workspace == null) return false;
+
+            var userRole = await GetUserRoleInWorkspace(workspace, userId);
+
+            // Admin ve Editor düzenleyebilir, ayrıca not sahibi de düzenleyebilir
+            return userRole == "Admin" || userRole == "Editor" || note.CreatedById == userId;
+        }
+
+        // HELPER: SİLME YETKİSİ (Admin veya Yaratıcı)
+        private async Task<bool> CheckNoteDeletePermission(Note note, Guid userId)
+        {
+            if (note.WorkspaceId == null)
+            {
+                return note.CreatedById == userId;
+            }
+
+            var workspace = await _unitOfWork.Workspaces.GetByIdWithMembersAsync(note.WorkspaceId.Value);
+            if (workspace == null) return false;
+
+            var userRole = await GetUserRoleInWorkspace(workspace, userId);
+
+            // Admin tüm notları silebilir, diğerleri sadece kendi notlarını
+            return userRole == "Admin" || note.CreatedById == userId;
+        }
+
+        // HELPER: KULLANICI ROLÜNÜ AL
+        private async Task<string> GetUserRoleInWorkspace(Workspace workspace, Guid userId)
+        {
+            if (workspace.OwnerId == userId) return "Admin";
+
+            var member = workspace.Members.FirstOrDefault(m => m.UserId == userId);
+            return member?.Role ?? "None";
+        }
+
+        // HELPER: DTO MAPPING
+        private async Task<NoteDto> MapToDtoWithUsername(Note note)
+        {
+            var creator = await _unitOfWork.Notes.ListAsync(n => n.Id == note.Id);
+            var creatorUser = creator.FirstOrDefault()?.CreatedBy;
+
             return new NoteDto
             {
                 Id = note.Id,
                 Title = note.Title,
                 Content = note.Content,
                 IsPinned = note.IsPinned,
+                Tags = note.Tags ?? new List<string>(),
                 WorkspaceId = note.WorkspaceId,
                 CreatedById = note.CreatedById,
+                CreatedByUsername = creatorUser?.UserName ?? "Unknown",
                 CreatedAt = note.CreatedAt,
-                UpdatedAt = note.UpdatedAt
+                UpdatedAt = note.UpdatedAt,
+                Tasks = note.Tasks?.Select(t => new TaskItemDto
+                {
+                    Id = t.Id,
+                    NoteId = t.NoteId,
+                    Title = t.Title,
+                    Description = t.Description,
+                    IsCompleted = t.IsCompleted,
+                    DueDate = t.DueDate,
+                    AssignedToId = t.AssignedToId
+                }).ToList() ?? new List<TaskItemDto>()
             };
+        }
+
+        private async Task<List<NoteDto>> MapToDtoListWithUsername(IEnumerable<Note> notes)
+        {
+            var result = new List<NoteDto>();
+            foreach (var note in notes)
+            {
+                result.Add(await MapToDtoWithUsername(note));
+            }
+            return result;
         }
     }
 }

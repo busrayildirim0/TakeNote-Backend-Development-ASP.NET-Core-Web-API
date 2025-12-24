@@ -1,11 +1,12 @@
-﻿using TakeNote.Service.DTOs;
+﻿// TakeNote.Service/Interfaces/IUserService.cs - GÜNCELLENMİŞ
+using TakeNote.Service.DTOs;
 
 namespace TakeNote.Service.Interfaces
 {
     public interface IUserService
     {
-        Task<UserAuthResponseDto> GetUserByIdAsync(Guid id);
-        Task UpdateUserAsync(Guid id, UserUpdateDto dto); // Yeni
-        Task DeleteUserAsync(Guid id); // Yeni
+        Task<UserProfileDto> GetProfileAsync(Guid userId);
+        Task<UserProfileDto> UpdateProfileAsync(Guid userId, UserUpdateDto dto);
+        Task DeleteAccountAsync(Guid userId);
     }
 }

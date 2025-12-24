@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using TakeNote.DataAccess;
 
@@ -11,9 +12,11 @@ using TakeNote.DataAccess;
 namespace TakeNote.DataAccess.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20251209103806_RemoveSoftDeleteFromNotes")]
+    partial class RemoveSoftDeleteFromNotes
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -151,6 +154,44 @@ namespace TakeNote.DataAccess.Migrations
                     b.HasKey("UserId", "LoginProvider", "Name");
 
                     b.ToTable("AspNetUserTokens", (string)null);
+                });
+
+            modelBuilder.Entity("TakeNote.Core.Entities.Attachment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("NoteId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("UploadedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("UploadedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Url")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NoteId");
+
+                    b.HasIndex("UploadedById");
+
+                    b.ToTable("Attachments");
                 });
 
             modelBuilder.Entity("TakeNote.Core.Entities.Note", b =>
@@ -409,6 +450,25 @@ namespace TakeNote.DataAccess.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("TakeNote.Core.Entities.Attachment", b =>
+                {
+                    b.HasOne("TakeNote.Core.Entities.Note", "Note")
+                        .WithMany("Attachments")
+                        .HasForeignKey("NoteId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("TakeNote.Core.Entities.User", "UploadedBy")
+                        .WithMany()
+                        .HasForeignKey("UploadedById")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Note");
+
+                    b.Navigation("UploadedBy");
+                });
+
             modelBuilder.Entity("TakeNote.Core.Entities.Note", b =>
                 {
                     b.HasOne("TakeNote.Core.Entities.User", "CreatedBy")
@@ -465,6 +525,8 @@ namespace TakeNote.DataAccess.Migrations
 
             modelBuilder.Entity("TakeNote.Core.Entities.Note", b =>
                 {
+                    b.Navigation("Attachments");
+
                     b.Navigation("Tasks");
                 });
 
