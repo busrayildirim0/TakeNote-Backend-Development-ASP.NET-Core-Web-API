@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  # 1. KUTU: SQL Server (Veritaban�)
+  takenote-db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: takenote_sql_server
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_SA_PASSWORD=Your_Strong_Password123! # Docker i�indeki DB �ifresi
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlvolume:/var/opt/mssql # Veriler kaybolmas�n diye disk alan�
+
+  # 2. KUTU: Senin API Projen
+  takenote-api:
+    image: takenote-api
+    container_name: takenote_api_container
+    build:
+      context: .
+      dockerfile: TakeNote.API/Dockerfile
+    ports:
+      - "8080:8080" # D��ar�dan 8080 ile eri�ece�iz
+    depends_on:
+      - takenote-db # Veritaban� a��lmadan API a��lmas�n
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      # D�KKAT: Docker i�indeyken "Server=takenote-db" diyoruz (Localhost de�il!)
+      - ConnectionStrings__DefaultConnection=Server=takenote-db;Database=TakeNoteDB;User Id=sa;Password=Your_Strong_Password123!;TrustServerCertificate=True;
+      # JWT Ayarlar�n� buradan da verebilirsin (Opsiyonel, appsettings'den okur)
+      - JwtSettings__Secret=TAKENOTE123456789TAKENOTE123456789
+
+volumes:
+  sqlvolume:

@@ -12,7 +12,10 @@ namespace TakeNote.Service.Services
         private readonly ILogger<TaskItemService> _logger;
         private readonly INotificationService _notificationService;
 
-        public TaskItemService(IUnitOfWork unitOfWork, ILogger<TaskItemService> logger, INotificationService notificationService)
+        public TaskItemService(
+            IUnitOfWork unitOfWork,
+            ILogger<TaskItemService> logger,
+            INotificationService notificationService)
         {
             _unitOfWork = unitOfWork;
             _logger = logger;
@@ -22,17 +25,16 @@ namespace TakeNote.Service.Services
         public async Task<TaskItemDto> CreateAsync(TaskItemCreateDto dto, Guid userId)
         {
             var parentNote = await _unitOfWork.Notes.GetByIdAsync(dto.NoteId);
-            if (parentNote == null) throw new Exception("Note not found");
+            if (parentNote == null)
+                throw new Exception("Note not found");
 
             if (parentNote.WorkspaceId == null && parentNote.CreatedById != userId)
-            {
-                throw new UnauthorizedAccessException("Cannot add task to someone else's personal note.");
-            }
+                throw new UnauthorizedAccessException(
+                    "Cannot add task to someone else's personal note.");
 
             var task = new TaskItem
             {
                 NoteId = dto.NoteId,
-                Title = dto.Description, // ✅ TITLE EKLENDI
                 Description = dto.Description,
                 DueDate = dto.DueDate,
                 AssignedToId = dto.AssignedToId,
@@ -45,16 +47,22 @@ namespace TakeNote.Service.Services
             var taskDto = MapToDto(task);
             await _notificationService.NotifyTaskAddedAsync(dto.NoteId, taskDto);
 
-            _logger.LogInformation("Task {TaskId} added to Note {NoteId}", task.Id, dto.NoteId);
+            _logger.LogInformation(
+                "Task {TaskId} added to Note {NoteId}",
+                task.Id,
+                dto.NoteId);
+
             return taskDto;
         }
 
         public async Task ToggleCompleteAsync(int id)
         {
             var task = await _unitOfWork.TaskItems.GetByIdAsync(id);
-            if (task == null) throw new Exception("Task not found");
+            if (task == null)
+                throw new Exception("Task not found");
 
             task.IsCompleted = !task.IsCompleted;
+
             _unitOfWork.TaskItems.Update(task);
             await _unitOfWork.CompleteAsync();
 
@@ -62,12 +70,43 @@ namespace TakeNote.Service.Services
             await _notificationService.NotifyTaskUpdatedAsync(task.NoteId, taskDto);
         }
 
+        public async Task<TaskItemDto> UpdateAsync(int id, TaskItemUpdateDto dto)
+        {
+            var task = await _unitOfWork.TaskItems.GetByIdAsync(id);
+            if (task == null)
+                throw new Exception("Task not found");
+
+            if (dto.Description != null)
+                task.Description = dto.Description;
+
+            if (dto.IsCompleted.HasValue)
+                task.IsCompleted = dto.IsCompleted.Value;
+
+            if (dto.DueDate.HasValue)
+                task.DueDate = dto.DueDate;
+
+            if (dto.AssignedToId.HasValue)
+                task.AssignedToId = dto.AssignedToId;
+
+            _unitOfWork.TaskItems.Update(task);
+            await _unitOfWork.CompleteAsync();
+
+            var taskDto = MapToDto(task);
+            await _notificationService.NotifyTaskUpdatedAsync(task.NoteId, taskDto);
+
+            _logger.LogInformation("Task {TaskId} updated", id);
+
+            return taskDto;
+        }
+
         public async Task DeleteAsync(int id)
         {
             var task = await _unitOfWork.TaskItems.GetByIdAsync(id);
-            if (task == null) return;
+            if (task == null)
+                return;
 
             int noteId = task.NoteId;
+
             _unitOfWork.TaskItems.Delete(task);
             await _unitOfWork.CompleteAsync();
 
@@ -80,7 +119,6 @@ namespace TakeNote.Service.Services
             {
                 Id = task.Id,
                 NoteId = task.NoteId,
-                Title = task.Title, 
                 Description = task.Description,
                 IsCompleted = task.IsCompleted,
                 DueDate = task.DueDate,

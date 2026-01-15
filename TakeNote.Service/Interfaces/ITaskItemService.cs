@@ -8,5 +8,6 @@ namespace TakeNote.Service.Interfaces
         Task<TaskItemDto> CreateAsync(TaskItemCreateDto dto, Guid userId);
         Task ToggleCompleteAsync(int id);
         Task DeleteAsync(int id);
+        Task<TaskItemDto> UpdateAsync(int id, TaskItemUpdateDto dto);
     }
 }

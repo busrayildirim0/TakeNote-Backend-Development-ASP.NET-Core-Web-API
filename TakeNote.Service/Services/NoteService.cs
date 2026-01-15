@@ -13,9 +13,9 @@ namespace TakeNote.Service.Services
         private readonly INotificationService _notificationService;
 
         public NoteService(
-            IUnitOfWork unitOfWork,
-            ILogger<NoteService> logger,
-            INotificationService notificationService)
+           IUnitOfWork unitOfWork,
+           ILogger<NoteService> logger,
+           INotificationService notificationService)
         {
             _unitOfWork = unitOfWork;
             _logger = logger;
@@ -104,43 +104,36 @@ namespace TakeNote.Service.Services
         public async Task UpdateAsync(int id, NoteUpdateDto dto, Guid userId)
         {
             var note = await _unitOfWork.Notes.GetByIdWithRelationsAsync(id);
-            if (note == null) throw new Exception("Note not found");
+            if (note == null)
+                throw new Exception("Note not found");
 
-            // ROL BAZLI YETKİ KONTROLÜ
             bool canEdit = await CheckNoteEditPermission(note, userId);
-            if (!canEdit) throw new UnauthorizedAccessException("Bu notu düzenleyemezsiniz.");
+            if (!canEdit)
+                throw new UnauthorizedAccessException("Bu notu düzenleyemezsiniz.");
 
-            if (dto.Title != null) note.Title = dto.Title;
-            if (dto.Content != null) note.Content = dto.Content;
-            if (dto.IsPinned.HasValue) note.IsPinned = dto.IsPinned.Value;
-            if (dto.IsLocked.HasValue) note.IsLocked = dto.IsLocked.Value;
-            if (dto.Tags != null) note.Tags = dto.Tags;
+            if (dto.Title != null)
+                note.Title = dto.Title;
 
-            // Görevleri güncelle
-            if (dto.Tasks != null)
-            {
-                note.Tasks.Clear();
-                foreach (var taskDto in dto.Tasks)
-                {
-                    note.Tasks.Add(new TaskItem
-                    {
-                        Title = taskDto.Title,
-                        Description = taskDto.Description,
-                        IsCompleted = taskDto.IsCompleted,
-                        DueDate = taskDto.DueDate,
-                        AssignedToId = taskDto.AssignedToId
-                    });
-                }
-            }
+            if (dto.Content != null)
+                note.Content = dto.Content;
+
+            if (dto.IsPinned.HasValue)
+                note.IsPinned = dto.IsPinned.Value;
+
+            if (dto.IsLocked.HasValue)
+                note.IsLocked = dto.IsLocked.Value;
+
+            if (dto.Tags != null)
+                note.Tags = dto.Tags;
 
             note.UpdatedAt = DateTime.UtcNow;
+
             _unitOfWork.Notes.Update(note);
             await _unitOfWork.CompleteAsync();
 
             await _notificationService.NotifyNoteUpdatedAsync(id, id, dto);
             _logger.LogInformation("Note updated: {NoteId}", id);
         }
-
         // DELETE - DOĞRUDAN SİLİNİYOR (ÇÖP KUTUSU YOK)
         public async Task DeleteAsync(int id, Guid userId)
         {
@@ -201,11 +194,12 @@ namespace TakeNote.Service.Services
                 notes = notes.Where(n => n.CreatedAt >= createdAfter.Value);
             }
 
-            // BANA ATANANLAR
-            if (assignedToMe == true)
+            
+            if (assignedToMe == true && workspaceId.HasValue)
             {
                 notes = notes.Where(n => n.Tasks.Any(t => t.AssignedToId == userId));
             }
+
 
             return await MapToDtoListWithUsername(notes);
         }
@@ -292,7 +286,6 @@ namespace TakeNote.Service.Services
                 {
                     Id = t.Id,
                     NoteId = t.NoteId,
-                    Title = t.Title,
                     Description = t.Description,
                     IsCompleted = t.IsCompleted,
                     DueDate = t.DueDate,
