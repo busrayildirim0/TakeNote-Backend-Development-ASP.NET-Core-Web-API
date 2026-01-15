@@ -44,12 +44,24 @@ The project follows a **Layered Architecture** (N-Tier) combined with the **Repo
  )
 
 
+### 🗄️ Database Design & Schema
 
-### Database Design (ERD)
-The database schema handles complex relationships between Users, Workspaces, and Notes.
-![ER Diagram]
-[Untitled-1.py](https://github.com/user-attachments/files/24653253/Untitled-1.py)df1=pd.read_csv("C:\Users\Hp\OneDrive\Masaüstü\geant4_data\lar_tpc_data_20251010_160609.csv")
+The database is designed using a **Code-First** approach with Entity Framework Core. It handles complex relationships between users, collaborative workspaces, and content.
+
+[Untitled-1.py](https://github.com/user-attachments/files/24653330/Untitled-1.py)df1=pd.read_csv("C:\Users\Hp\OneDrive\Masaüstü\geant4_data\lar_tpc_data_20251010_160609.csv")
 print(f"Number of rows in df1: {len(df1)}")
+
+
+
+#### Key Tables & Responsibilities
+
+| Table | Description |
+| :--- | :--- |
+| **`AspNetUsers`** | Extends the standard IdentityUser. Stores secure login credentials, password hashes, and user profile data. |
+| **`Workspaces`** | The central hub for collaboration. Contains metadata like Title, Description, and OwnerId. |
+| **`WorkspaceMembers`** | A junction table managing the **Many-to-Many** relationship between Users and Workspaces. It specifically holds the **Role** (Admin, Editor, Viewer) for RBAC. |
+| **`Notes`** | The core entity. If `WorkspaceId` is null, it acts as a **Personal Note**. If linked to a workspace, it becomes a **Shared Note**. |
+| **`TaskItems`** | Represents actionable to-do items linked to a specific Note (One-to-Many relationship). |
 
 
 ---
