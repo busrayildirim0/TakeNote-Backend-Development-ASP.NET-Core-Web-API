@@ -48,8 +48,7 @@ The project follows a **Layered Architecture** (N-Tier) combined with the **Repo
 
 The database is designed using a **Code-First** approach with Entity Framework Core. It handles complex relationships between users, collaborative workspaces, and content.
 
-[Untitled-1.py](https://github.com/user-attachments/files/24653330/Untitled-1.py)df1=pd.read_csv("C:\Users\Hp\OneDrive\Masaüstü\geant4_data\lar_tpc_data_20251010_160609.csv")
-print(f"Number of rows in df1: {len(df1)}")
+<img width="1465" height="925" alt="takenote erd" src="https://github.com/user-attachments/assets/087350d8-e9e8-48f3-8e8a-91cd57a212bb" />
 
 
 
