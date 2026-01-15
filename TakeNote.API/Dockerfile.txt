@@ -1,0 +1,25 @@
+# 1. Aşama: Build (İnşaat) - Kodları derlemek için SDK kullanıyoruz
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+# Proje dosyalarını kopyala
+COPY ["TakeNote.API/TakeNote.API.csproj", "TakeNote.API/"]
+COPY ["TakeNote.Core/TakeNote.Core.csproj", "TakeNote.Core/"]
+COPY ["TakeNote.DataAccess/TakeNote.DataAccess.csproj", "TakeNote.DataAccess/"]
+COPY ["TakeNote.Service/TakeNote.Service.csproj", "TakeNote.Service/"]
+
+# Kütüphaneleri indir (Restore)
+RUN dotnet restore "TakeNote.API/TakeNote.API.csproj"
+
+# Kalan her şeyi kopyala
+COPY . .
+WORKDIR "/src/TakeNote.API"
+
+# Projeyi derle ve yayınla (Publish)
+RUN dotnet publish "TakeNote.API.csproj" -c Release -o /app/publish
+
+# 2. Aşama: Runtime (Çalıştırma) - Sadece gerekli dosyaları alıyoruz (Daha hafif)
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
+WORKDIR /app
+COPY --from=build /app/publish .
+ENTRYPOINT ["dotnet", "TakeNote.API.dll"]

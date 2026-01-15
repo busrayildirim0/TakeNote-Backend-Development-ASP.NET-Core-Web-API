@@ -73,12 +73,13 @@ namespace TakeNote.API.Controllers
         {
             await _noteService.UpdateAsync(id, dto, GetUserId());
 
-            // Not güncellendiğinde, o notu izleyenlere (note_{id} grubuna) bildirim gider
+            // SADECE note metadata güncellendi bilgisi gider
             await _hubContext.Clients.Group($"note_{id}")
                 .SendAsync("ReceiveNoteUpdate", id, dto);
 
             return NoContent();
         }
+
 
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(int id)
@@ -97,13 +98,15 @@ namespace TakeNote.API.Controllers
         public async Task<IActionResult> SearchPersonalNotes(
             [FromQuery] string? query,
             [FromQuery] bool? pinnedOnly,
-            [FromQuery] DateTime? createdAfter,
-            [FromQuery] bool? assignedToMe)
+            [FromQuery] DateTime? createdAfter)
         {
             var result = await _noteService.SearchNotesAsync(
-                GetUserId(), null, query, pinnedOnly, createdAfter, assignedToMe);
+                GetUserId(), null, query, pinnedOnly, createdAfter, null);
+
             return Ok(result);
         }
+
+
 
         [HttpGet("workspace/{workspaceId}/search")]
         public async Task<IActionResult> SearchWorkspaceNotes(

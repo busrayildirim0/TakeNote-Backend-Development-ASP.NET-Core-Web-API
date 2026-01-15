@@ -6,7 +6,6 @@ namespace TakeNote.Core.Entities
         public int Id { get; set; }
 
         // YENİ: Description yerine Title (Frontend'deki gibi)
-        public string Title { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty; // Opsiyonel detay
 
         public bool IsCompleted { get; set; } = false;

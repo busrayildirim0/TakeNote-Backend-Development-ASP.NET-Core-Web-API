@@ -11,16 +11,29 @@ namespace TakeNote.API.Controllers
     public class CollaborationController : ControllerBase
     {
         private readonly IHubContext<CollaborationHub> _hubContext;
+        private readonly ILogger<CollaborationController> _logger;
 
-        public CollaborationController(IHubContext<CollaborationHub> hubContext)
+        public CollaborationController(
+            IHubContext<CollaborationHub> hubContext,
+            ILogger<CollaborationController> logger)
         {
             _hubContext = hubContext;
+            _logger = logger;
         }
 
         [HttpPost("typing/{noteId}")]
         public async Task<IActionResult> SendTypingIndicator(string noteId)
         {
-            await _hubContext.Clients.Group(noteId).SendAsync("UserTyping", noteId);
+            _logger.LogInformation(
+                "Typing indicator triggered for NoteId: {NoteId}", noteId);
+
+            await _hubContext.Clients
+                .Group($"note_{noteId}")
+                .SendAsync("UserTyping", noteId);
+
+            _logger.LogInformation(
+                "Typing indicator sent via SignalR for NoteId: {NoteId}", noteId);
+
             return Ok();
         }
     }

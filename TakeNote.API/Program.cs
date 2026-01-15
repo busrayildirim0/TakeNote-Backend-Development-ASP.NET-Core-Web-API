@@ -5,9 +5,11 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
 using TakeNote.API.Hubs;
+using TakeNote.API.Middlewares; // Middleware namespace
 using TakeNote.API.Services;
 using TakeNote.Core.Entities;
 using TakeNote.Core.Interfaces;
+using TakeNote.Core.Settings; // Settings namespace
 using TakeNote.DataAccess;
 using TakeNote.DataAccess.Repositories;
 using TakeNote.Service.Interfaces;
@@ -15,13 +17,17 @@ using TakeNote.Service.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. DATABASE
+// 1. CONFIGURATION (Options Pattern)
+// JwtSettings sınıfını appsettings.json ile eşleştiriyoruz.
+builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection("JwtSettings"));
+
+// 2. DATABASE
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(
         builder.Configuration.GetConnectionString("DefaultConnection"),
         sqlOptions => sqlOptions.EnableRetryOnFailure()));
 
-// 2. IDENTITY
+// 3. IDENTITY
 builder.Services.AddIdentity<User, IdentityRole<Guid>>(options =>
 {
     options.Password.RequireDigit = false;
@@ -33,17 +39,17 @@ builder.Services.AddIdentity<User, IdentityRole<Guid>>(options =>
 .AddEntityFrameworkStores<AppDbContext>()
 .AddDefaultTokenProviders();
 
-// 3. CORS (Frontend ayrı çalışacağı için önemli)
+// 4. CORS
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", builder =>
-        builder.SetIsOriginAllowed(_ => true) // Tüm originlere izin ver
+        builder.SetIsOriginAllowed(_ => true)
                .AllowAnyMethod()
                .AllowAnyHeader()
                .AllowCredentials());
 });
 
-// 4. DEPENDENCY INJECTION
+// 5. DEPENDENCY INJECTION
 builder.Services.AddScoped<IWorkspaceRepository, WorkspaceRepository>();
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IUserService, UserService>();
@@ -53,9 +59,11 @@ builder.Services.AddScoped<ITaskItemService, TaskItemService>();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
 builder.Services.AddScoped<INotificationService, SignalRNotificationService>();
 
-// 5. JWT Authentication
-var jwtSettings = builder.Configuration.GetSection("JwtSettings");
-var secretKey = Encoding.UTF8.GetBytes(jwtSettings["Secret"]!);
+// 6. JWT Authentication
+// Ayarları Options Pattern ile alıyoruz ama burada startup anında okumak için bind ediyoruz.
+var jwtSection = builder.Configuration.GetSection("JwtSettings");
+var jwtSettings = jwtSection.Get<JwtSettings>();
+var secretKey = Encoding.UTF8.GetBytes(jwtSettings!.Secret);
 
 builder.Services.AddAuthentication(options =>
 {
@@ -73,8 +81,8 @@ builder.Services.AddAuthentication(options =>
         ValidateAudience = true,
         ValidateLifetime = true,
         ValidateIssuerSigningKey = true,
-        ValidIssuer = jwtSettings["Issuer"],
-        ValidAudience = jwtSettings["Audience"],
+        ValidIssuer = jwtSettings.Issuer,
+        ValidAudience = jwtSettings.Audience,
         IssuerSigningKey = new SymmetricSecurityKey(secretKey),
         ClockSkew = TimeSpan.Zero
     };
@@ -95,6 +103,11 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
+// 7. LOGGING (Varsayılan loglama zaten geliyor ama console loglarını netleştirelim)
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+builder.Logging.AddDebug();
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSignalR(options =>
@@ -108,7 +121,7 @@ builder.Services.AddSwaggerGen(c =>
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "TakeNote API", Version = "v1" });
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
-        Description = "JWT Authorization header using the Bearer scheme. Example: \"Bearer {token}\"",
+        Description = "JWT Authorization header using the Bearer scheme.",
         Name = "Authorization",
         In = ParameterLocation.Header,
         Type = SecuritySchemeType.ApiKey,
@@ -133,11 +146,12 @@ var app = builder.Build();
 
 // --- HTTP REQUEST PIPELINE ---
 
-// Swagger her ortamda açık olsun (API testi için)
+// [ÖNEMLİ] Global Exception Middleware - En başa yakın olmalı
+app.UseMiddleware<ExceptionMiddleware>();
+
 app.UseSwagger();
 app.UseSwaggerUI();
 
-// Ana sayfaya gelen isteği direkt Swagger'a yönlendir
 app.MapGet("/", context =>
 {
     context.Response.Redirect("/swagger/index.html");
@@ -146,10 +160,6 @@ app.MapGet("/", context =>
 
 app.UseHttpsRedirection();
 
-// Statik dosya sunumu (wwwroot) KALDIRILDI
-// app.UseDefaultFiles();
-// app.UseStaticFiles();
-
 app.UseCors("AllowAll");
 
 app.UseAuthentication();
@@ -157,8 +167,5 @@ app.UseAuthorization();
 
 app.MapHub<CollaborationHub>("/collaborationHub");
 app.MapControllers();
-
-// Fallback KALDIRILDI (SPA olmadığı için)
-// app.MapFallbackToFile("index.html");
 
 app.Run();
