@@ -110,11 +110,14 @@ The easiest way to run the application is using Docker.
     * **Swagger UI:** `http://localhost:8080/swagger`
 
 ---
+Azure Deploy Link: https://takenoteapi20251224212526-apbkcqfbgudvbse8.germanywestcentral-01.azurewebsites.net/swagger/index.html 
+Trello link: https://trello.com/invite/b/694be8a599d927320fc50cc5/ATTI5a72e47444f098b6e3b3d96df12e7179F010D390/backend-project-takenote
 
 ##  API Documentation & Testing
 
 ### Swagger UI
 We provide full API documentation via Swagger. You can test all endpoints (Auth, Notes, Workspaces) directly from the browser.
+
 
 <img width="1393" height="870" alt="Ekran görüntüsü 2026-01-16 003532" src="https://github.com/user-attachments/assets/a7468e49-2282-41ba-99ba-cb7c39d25bfb" />
 
