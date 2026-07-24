@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -23,9 +23,7 @@ builder.Services.Configure<JwtSettings>(builder.Configuration.GetSection("JwtSet
 
 // 2. DATABASE
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer(
-        builder.Configuration.GetConnectionString("DefaultConnection"),
-        sqlOptions => sqlOptions.EnableRetryOnFailure()));
+    options.UseInMemoryDatabase("TakeNoteDB"));
 
 // 3. IDENTITY
 builder.Services.AddIdentity<User, IdentityRole<Guid>>(options =>
@@ -167,5 +165,105 @@ app.UseAuthorization();
 
 app.MapHub<CollaborationHub>("/collaborationHub");
 app.MapControllers();
+
+// Seeding default users (Alice, Bob, Charlie) and workspaces/notes
+using (var scope = app.Services.CreateScope())
+{
+    var services = scope.ServiceProvider;
+    try
+    {
+        var userManager = services.GetRequiredService<UserManager<User>>();
+        var roleManager = services.GetRequiredService<RoleManager<IdentityRole<Guid>>>();
+        var dbContext = services.GetRequiredService<AppDbContext>();
+        
+        // 1. Seed default roles
+        var roles = new[] { "Admin", "Editor", "Viewer" };
+        foreach (var roleName in roles)
+        {
+            if (!roleManager.RoleExistsAsync(roleName).GetAwaiter().GetResult())
+            {
+                roleManager.CreateAsync(new IdentityRole<Guid> { Name = roleName }).GetAwaiter().GetResult();
+            }
+        }
+        
+        // 2. Seed default users
+        var aliceUser = userManager.FindByEmailAsync("alice@takenote.com").GetAwaiter().GetResult();
+        var bobUser = userManager.FindByEmailAsync("bob@takenote.com").GetAwaiter().GetResult();
+        var charlieUser = userManager.FindByEmailAsync("charlie@takenote.com").GetAwaiter().GetResult();
+        
+        if (aliceUser == null)
+        {
+            aliceUser = new User { UserName = "alice", Email = "alice@takenote.com", EmailConfirmed = true };
+            userManager.CreateAsync(aliceUser, "Password123!").GetAwaiter().GetResult();
+        }
+        if (bobUser == null)
+        {
+            bobUser = new User { UserName = "bob", Email = "bob@takenote.com", EmailConfirmed = true };
+            userManager.CreateAsync(bobUser, "Password123!").GetAwaiter().GetResult();
+        }
+        if (charlieUser == null)
+        {
+            charlieUser = new User { UserName = "charlie", Email = "charlie@takenote.com", EmailConfirmed = true };
+            userManager.CreateAsync(charlieUser, "Password123!").GetAwaiter().GetResult();
+        }
+        
+        // 3. Seed some workspaces, members, notes and tasks if db is empty
+        if (!dbContext.Workspaces.Any())
+        {
+            var ws1 = new Workspace
+            {
+                Title = "Project TakeNote Team",
+                Description = "Primary workspace for building the TakeNote Frontend and Realtime collaboration.",
+                IsPrivate = false,
+                OwnerId = aliceUser.Id,
+                CreatedAt = DateTime.UtcNow
+            };
+            dbContext.Workspaces.Add(ws1);
+            dbContext.SaveChanges(); // get Id
+            
+            var memberAlice = new WorkspaceMember { UserId = aliceUser.Id, WorkspaceId = ws1.Id, Role = "Owner", JoinedAt = DateTime.UtcNow };
+            var memberBob = new WorkspaceMember { UserId = bobUser.Id, WorkspaceId = ws1.Id, Role = "Editor", JoinedAt = DateTime.UtcNow };
+            var memberCharlie = new WorkspaceMember { UserId = charlieUser.Id, WorkspaceId = ws1.Id, Role = "Viewer", JoinedAt = DateTime.UtcNow };
+            dbContext.WorkspaceMembers.AddRange(memberAlice, memberBob, memberCharlie);
+            
+            var note1 = new Note
+            {
+                Title = "Frontend Styling & Custom Guidelines",
+                Content = "Here are the core rules:\n1. Keep it glassmorphic!\n2. Dark mode defaults with indigo colors.\n3. Make sure auto-saves happen smoothly.",
+                IsPinned = true,
+                WorkspaceId = ws1.Id,
+                CreatedById = aliceUser.Id,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                Tags = new List<string> { "design", "css", "guideline" }
+            };
+            dbContext.Notes.Add(note1);
+            dbContext.SaveChanges();
+            
+            var task1 = new TaskItem { NoteId = note1.Id, Description = "Design the style.css variables", IsCompleted = true, DueDate = DateTime.UtcNow.AddDays(1) };
+            var task2 = new TaskItem { NoteId = note1.Id, Description = "Implement SignalR connection handlers in app.js", IsCompleted = false, DueDate = DateTime.UtcNow.AddDays(3), AssignedToId = bobUser.Id };
+            var task3 = new TaskItem { NoteId = note1.Id, Description = "Perform cross-browser check", IsCompleted = false, DueDate = DateTime.UtcNow.AddDays(5), AssignedToId = charlieUser.Id };
+            dbContext.TaskItems.AddRange(task1, task2, task3);
+            
+            var personalNote = new Note
+            {
+                Title = "Alice's Secret Ideas",
+                Content = "Research offline-first service worker sync for notes storage next week.",
+                IsPinned = false,
+                WorkspaceId = null,
+                CreatedById = aliceUser.Id,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                Tags = new List<string> { "research", "secret" }
+            };
+            dbContext.Notes.Add(personalNote);
+            dbContext.SaveChanges();
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error seeding data: {ex.Message}");
+    }
+}
 
 app.Run();

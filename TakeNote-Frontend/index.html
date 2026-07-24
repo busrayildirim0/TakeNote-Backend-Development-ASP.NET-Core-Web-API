@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TakeNote — Collab Space</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="style.css">
+    <!-- SignalR Client -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/7.0.5/signalr.min.js"></script>
+</head>
+<body>
+    <!-- Background Elements -->
+    <div class="bg-glow bg-glow-1"></div>
+    <div class="bg-glow bg-glow-2"></div>
+
+    <!-- App Container -->
+    <div id="app" class="app-container">
+
+        <!-- ==================== AUTHENTICATION SECTION ==================== -->
+        <section id="authSection" class="auth-section">
+            <div class="auth-card glass">
+                <div class="auth-header">
+                    <div class="logo">
+                        <i class="fa-solid fa-file-signature text-gradient"></i>
+                        <span class="logo-text">Take<span class="text-gradient">Note</span></span>
+                    </div>
+                    <p class="auth-subtitle">Collaborative note-taking and workspace tool</p>
+                </div>
+
+                <!-- Backend Selector in Auth -->
+                <div class="backend-selector-wrapper mb-4">
+                    <label for="authBackendSelect"><i class="fa-solid fa-server"></i> API Server Connection:</label>
+                    <select id="authBackendSelect" class="form-select">
+                        <option value="http://localhost:5159/api">Local HTTP (http://localhost:5159)</option>
+                        <option value="https://takenoteapi20251224212526-apbkcqfbgudvbse8.germanywestcentral-01.azurewebsites.net/api">Cloud (Azure Live)</option>
+                        <option value="https://localhost:7139/api">Local IIS Express (https://localhost:7139)</option>
+                        <option value="http://localhost:8080/api">Local Docker (http://localhost:8080)</option>
+                        <option value="custom">Custom URL...</option>
+                    </select>
+                    <div id="authCustomUrlContainer" class="mt-2 hidden">
+                        <input type="text" id="authCustomUrlInput" class="form-control" placeholder="https://your-custom-api.com/api">
+                    </div>
+                </div>
+
+                <!-- Tab controllers -->
+                <div class="auth-tabs">
+                    <button id="tabLogin" class="auth-tab active" onclick="switchAuthTab('login')">Sign In</button>
+                    <button id="tabRegister" class="auth-tab" onclick="switchAuthTab('register')">Sign Up</button>
+                </div>
+
+                <!-- Login Form -->
+                <form id="loginForm" class="auth-form" onsubmit="handleLogin(event)">
+                    <div class="form-group">
+                        <label for="loginEmail">Email Address</label>
+                        <div class="input-wrapper">
+                            <i class="fa-regular fa-envelope"></i>
+                            <input type="email" id="loginEmail" placeholder="name@domain.com" required>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="loginPassword">Password</label>
+                        <div class="input-wrapper">
+                            <i class="fa-solid fa-lock"></i>
+                            <input type="password" id="loginPassword" placeholder="••••••••" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100 mt-3">
+                        <span>Sign In</span>
+                        <i class="fa-solid fa-arrow-right"></i>
+                    </button>
+                </form>
+
+                <!-- Register Form -->
+                <form id="registerForm" class="auth-form hidden" onsubmit="handleRegister(event)">
+                    <div class="form-group">
+                        <label for="registerUsername">Username</label>
+                        <div class="input-wrapper">
+                            <i class="fa-regular fa-user"></i>
+                            <input type="text" id="registerUsername" placeholder="johndoe" required>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="registerEmail">Email Address</label>
+                        <div class="input-wrapper">
+                            <i class="fa-regular fa-envelope"></i>
+                            <input type="email" id="registerEmail" placeholder="name@domain.com" required>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="registerPassword">Password</label>
+                        <div class="input-wrapper">
+                            <i class="fa-solid fa-lock"></i>
+                            <input type="password" id="registerPassword" placeholder="••••••••" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100 mt-3">
+                        <span>Sign Up</span>
+                        <i class="fa-solid fa-user-plus"></i>
+                    </button>
+                </form>
+            </div>
+        </section>
+
+
+        <!-- ==================== MAIN DASHBOARD SECTION ==================== -->
+        <section id="dashboardSection" class="dashboard-section hidden">
+            <!-- Header bar -->
+            <header class="dashboard-header glass">
+                <div class="header-left">
+                    <div class="logo">
+                        <i class="fa-solid fa-file-signature text-gradient"></i>
+                        <span class="logo-text">Take<span class="text-gradient">Note</span></span>
+                    </div>
+                    <div id="connectionIndicator" class="conn-indicator disconnected" title="SignalR connection status">
+                        <span class="dot"></span>
+                        <span class="text">SignalR Offline</span>
+                    </div>
+                </div>
+
+                <div class="header-right">
+                    <!-- Backend selector inside app -->
+                    <div class="dashboard-api-selector">
+                        <select id="dashboardBackendSelect" class="form-select select-sm">
+                            <option value="http://localhost:5159/api">Local (HTTP)</option>
+                            <option value="https://takenoteapi20251224212526-apbkcqfbgudvbse8.germanywestcentral-01.azurewebsites.net/api">Cloud (Azure)</option>
+                            <option value="https://localhost:7139/api">Local (IIS)</option>
+                            <option value="http://localhost:8080/api">Local (Docker)</option>
+                            <option value="custom">Custom...</option>
+                        </select>
+                    </div>
+
+                    <!-- User info & Logout -->
+                    <div class="user-profile-menu">
+                        <span class="user-avatar" id="headerUserAvatar">U</span>
+                        <div class="user-meta-info">
+                            <span class="user-display-name" id="headerUsername">User</span>
+                            <span class="user-display-email" id="headerEmail">user@example.com</span>
+                        </div>
+                        <button class="btn btn-icon-only" onclick="openProfileModal()" title="Profile Settings">
+                            <i class="fa-solid fa-circle-user"></i>
+                        </button>
+                        <button class="btn btn-icon-only text-danger" onclick="handleLogout()" title="Log out">
+                            <i class="fa-solid fa-right-from-bracket"></i>
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Dashboard Grid Layout -->
+            <div class="dashboard-grid">
+                
+                <!-- COLUMN 1: SIDEBAR (Workspaces) -->
+                <aside class="sidebar-panel glass">
+                    <div class="panel-header">
+                        <h3><i class="fa-solid fa-cubes"></i> Workspaces</h3>
+                        <button class="btn btn-icon" onclick="openCreateWorkspaceModal()" title="Create Workspace">
+                            <i class="fa-solid fa-plus"></i>
+                        </button>
+                    </div>
+
+                    <div class="workspace-nav">
+                        <!-- Personal Notes tab -->
+                        <div id="wsPersonal" class="workspace-item active" onclick="selectWorkspace(null)">
+                            <div class="ws-icon-wrap personal">
+                                <i class="fa-solid fa-user-lock"></i>
+                            </div>
+                            <div class="ws-details">
+                                <span class="ws-title">Personal Notes</span>
+                                <span class="ws-meta">Private sandbox</span>
+                            </div>
+                        </div>
+
+                        <!-- Workspaces List -->
+                        <div class="sidebar-scrollable" id="workspacesList">
+                            <!-- Populated dynamically -->
+                            <div class="skeleton-loader">
+                                <div class="skeleton-line"></div>
+                                <div class="skeleton-line"></div>
+                                <div class="skeleton-line"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="sidebar-footer">
+                        <button class="btn btn-outline-primary w-100" onclick="openPublicWorkspacesModal()">
+                            <i class="fa-solid fa-globe"></i> Explore Public Spaces
+                        </button>
+                    </div>
+                </aside>
+
+                <!-- COLUMN 2: NOTES COLUMN (Notes list and search) -->
+                <section class="notes-panel glass">
+                    <div class="panel-header column">
+                        <div class="d-flex justify-content-between align-items-center w-100 mb-3">
+                            <div class="d-flex align-items-center gap-2">
+                                <h3 id="notesListTitle">Personal Notes</h3>
+                                <button id="btnWorkspaceSettings" class="btn btn-icon-only" style="display: none;" onclick="openWorkspaceSettingsModal()" title="Workspace Settings">
+                                    <i class="fa-solid fa-gear text-gradient" style="font-size: 1rem;"></i>
+                                </button>
+                            </div>
+                            <button class="btn btn-primary btn-sm" onclick="handleCreateNoteBtnClick()">
+                                <i class="fa-solid fa-notes-medical"></i> New Note
+                            </button>
+                        </div>
+
+                        <!-- Search and filter widgets -->
+                        <div class="search-filters-wrapper">
+                            <div class="search-input-group">
+                                <i class="fa-solid fa-magnifying-glass"></i>
+                                <input type="text" id="noteSearchInput" placeholder="Search title or content..." oninput="triggerSearch()">
+                            </div>
+                            
+                            <div class="filter-controls mt-2">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="filterPinnedOnly" onchange="triggerSearch()">
+                                    <span><i class="fa-solid fa-thumbtack text-warning"></i> Pinned Only</span>
+                                </label>
+                                <label class="checkbox-label" id="assignedToMeFilterContainer" style="display: none;">
+                                    <input type="checkbox" id="filterAssignedToMe" onchange="triggerSearch()">
+                                    <span><i class="fa-solid fa-user-tag text-info"></i> Assigned To Me</span>
+                                </label>
+                            </div>
+                            
+                            <div class="date-filter-group mt-2">
+                                <span class="date-label">Created After:</span>
+                                <input type="date" id="filterCreatedAfter" class="date-input" onchange="triggerSearch()">
+                                <button class="btn btn-clear-date" onclick="clearDateFilter()" title="Clear date filter">
+                                    <i class="fa-solid fa-circle-xmark"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Notes Container -->
+                    <div class="notes-list-scrollable" id="notesListContainer">
+                        <!-- Populated dynamically -->
+                        <div class="empty-state">
+                            <i class="fa-regular fa-folder-open"></i>
+                            <p>No notes found</p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- COLUMN 3: SELECTED NOTE VIEW (Details, Editor, Tasks) -->
+                <section class="editor-panel glass" id="editorPanel">
+                    <!-- Note Active State -->
+                    <div id="noteActiveView" class="note-active-view hidden">
+                        <!-- Note Actions Toolbar -->
+                        <div class="editor-header">
+                            <div class="header-actions-left">
+                                <button class="btn btn-icon-only text-warning" id="btnPinNote" onclick="toggleActiveNotePin()" title="Pin/Unpin Note">
+                                    <i class="fa-regular fa-bookmark"></i>
+                                </button>
+                                <div class="note-owner-info" id="noteOwnerDisplay">
+                                    Created by: <strong id="noteOwnerUsername">Admin</strong>
+                                </div>
+                            </div>
+                            <div class="header-actions-right">
+                                <div id="liveTypingIndicator" class="typing-indicator-bubble hidden">
+                                    <div class="typing-dots">
+                                        <span></span>
+                                        <span></span>
+                                        <span></span>
+                                    </div>
+                                    <span class="typing-text" id="liveTypingText">Someone is typing...</span>
+                                </div>
+                                <button class="btn btn-outline-danger btn-sm" id="btnDeleteNote" onclick="deleteActiveNote()">
+                                    <i class="fa-regular fa-trash-can"></i> Delete
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Editor Form -->
+                        <div class="editor-body">
+                            <input type="text" id="editorNoteTitle" class="editor-title-input" placeholder="Untitled Note" oninput="handleNoteTitleInput()">
+                            
+                            <div class="editor-tags-bar mb-2">
+                                <span class="tags-label"><i class="fa-solid fa-tags"></i> Tags:</span>
+                                <div class="tags-container" id="editorTagsContainer">
+                                    <!-- Dynamic tags -->
+                                </div>
+                                <div class="add-tag-group">
+                                    <input type="text" id="newTagInput" placeholder="New tag..." onkeydown="handleNewTagKeydown(event)">
+                                    <button class="btn btn-icon-only" onclick="addTagFromInput()" title="Add Tag"><i class="fa-solid fa-circle-plus"></i></button>
+                                </div>
+                            </div>
+
+                            <textarea id="editorNoteContent" class="editor-content-textarea" placeholder="Start typing your thoughts here..." oninput="handleNoteContentInput()"></textarea>
+                        </div>
+
+                        <!-- Tasks Pane -->
+                        <div class="editor-tasks-section">
+                            <div class="tasks-header">
+                                <h4><i class="fa-solid fa-list-check"></i> Connected Tasks</h4>
+                                <span class="badge" id="tasksBadgeCount">0 Tasks</span>
+                            </div>
+
+                            <!-- New Task Input Form -->
+                            <form id="newTaskForm" class="new-task-form" onsubmit="handleAddTask(event)">
+                                <div class="form-row">
+                                    <input type="text" id="newTaskDesc" class="form-control" placeholder="Task description..." required>
+                                    <input type="date" id="newTaskDueDate" class="form-control date-input-sm" title="Due Date">
+                                    
+                                    <!-- Workspace Member Assign Selector (Only visible for Workspace Notes) -->
+                                    <select id="newTaskAssignSelect" class="form-select select-sm" style="display: none;">
+                                        <option value="">Unassigned</option>
+                                    </select>
+                                    
+                                    <button type="submit" class="btn btn-success btn-sm">
+                                        <i class="fa-solid fa-plus"></i> Add
+                                    </button>
+                                </div>
+                            </form>
+
+                            <!-- Task Items List -->
+                            <div class="tasks-list-container" id="tasksListContainer">
+                                <!-- Populated dynamically -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Note Empty State -->
+                    <div id="noteEmptyView" class="note-empty-view">
+                        <div class="empty-icon-wrap">
+                            <i class="fa-solid fa-pen-nib"></i>
+                        </div>
+                        <h3>No Note Selected</h3>
+                        <p>Select a note from the list, or create a brand new note to get started.</p>
+                    </div>
+                </section>
+
+            </div>
+        </section>
+
+    </div>
+
+
+    <!-- ==================== MODALS ==================== -->
+
+    <!-- Modal Backdrop -->
+    <div id="modalBackdrop" class="modal-backdrop hidden" onclick="closeAllModals()"></div>
+
+    <!-- 1. Create Workspace Modal -->
+    <div id="createWorkspaceModal" class="modal-card glass hidden">
+        <div class="modal-header">
+            <h3><i class="fa-solid fa-folder-plus text-gradient"></i> Create Workspace</h3>
+            <button class="btn-close-modal" onclick="closeAllModals()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <form onsubmit="handleCreateWorkspace(event)">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="createWsTitle">Workspace Name</label>
+                    <input type="text" id="createWsTitle" class="form-control" placeholder="e.g., Development Team" required>
+                </div>
+                <div class="form-group">
+                    <label for="createWsDesc">Description</label>
+                    <textarea id="createWsDesc" class="form-control" placeholder="Short description of this shared space..." rows="3"></textarea>
+                </div>
+                <div class="form-group flex-row">
+                    <label class="switch-container">
+                        <input type="checkbox" id="createWsIsPrivate" checked>
+                        <span class="slider"></span>
+                    </label>
+                    <div class="switch-label">
+                        <strong>Private Workspace</strong>
+                        <span>Only invited members can join</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline" onclick="closeAllModals()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Create Workspace</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- 2. Explore Public Workspaces Modal -->
+    <div id="publicWorkspacesModal" class="modal-card glass hidden">
+        <div class="modal-header">
+            <h3><i class="fa-solid fa-globe text-gradient"></i> Public Workspaces</h3>
+            <button class="btn-close-modal" onclick="closeAllModals()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+            <p class="modal-sub">Browse public workspaces and join to collaborate instantly.</p>
+            <div class="public-spaces-container scrollable-y" id="publicWorkspacesList">
+                <!-- Dynamically Populated -->
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-outline w-100" onclick="closeAllModals()">Close</button>
+        </div>
+    </div>
+
+    <!-- 3. Workspace Settings & Members Modal -->
+    <div id="workspaceSettingsModal" class="modal-card glass hidden">
+        <div class="modal-header flex-column align-items-start">
+            <div class="d-flex justify-content-between align-items-center w-100">
+                <h3 id="wsSettingsTitle">Workspace Settings</h3>
+                <button class="btn-close-modal" onclick="closeAllModals()"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <span class="badge bg-purple mt-1" id="myWorkspaceRole">My Role: Viewer</span>
+        </div>
+        <div class="modal-body">
+            
+            <!-- Update WS Details (Only for Admin/Owner) -->
+            <div id="wsUpdateDetailsSection" style="display: none;" class="setting-section">
+                <h4><i class="fa-solid fa-pen"></i> Workspace Info</h4>
+                <div class="form-group">
+                    <label for="updateWsTitle">Title</label>
+                    <input type="text" id="updateWsTitle" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label for="updateWsDesc">Description</label>
+                    <textarea id="updateWsDesc" class="form-control" rows="2"></textarea>
+                </div>
+                <button class="btn btn-primary btn-sm mb-3" onclick="updateWorkspaceDetails()">Save Changes</button>
+                <hr class="divider">
+            </div>
+
+            <!-- Members List -->
+            <div class="setting-section">
+                <h4><i class="fa-solid fa-users"></i> Workspace Members</h4>
+                <div class="members-list-wrapper scrollable-y mb-3" id="workspaceMembersList">
+                    <!-- Populated dynamically -->
+                </div>
+            </div>
+
+            <!-- Add Member Form (Only for Admin) -->
+            <div id="wsAddMemberSection" style="display: none;" class="setting-section mt-3">
+                <hr class="divider">
+                <h4><i class="fa-solid fa-user-plus"></i> Invite Member</h4>
+                <div class="form-row mt-2">
+                    <input type="text" id="addMemberIdentifier" class="form-control" placeholder="Email or Username" required>
+                    <select id="addMemberRole" class="form-select select-sm">
+                        <option value="Viewer">Viewer</option>
+                        <option value="Editor">Editor</option>
+                        <option value="Admin">Admin</option>
+                    </select>
+                    <button class="btn btn-success btn-sm" onclick="addWorkspaceMember()">Invite</button>
+                </div>
+            </div>
+
+            <!-- Danger Zone -->
+            <div class="setting-section danger-zone-section mt-4">
+                <hr class="divider">
+                <h4 class="text-danger"><i class="fa-solid fa-triangle-exclamation"></i> Actions</h4>
+                <div class="d-flex gap-2 mt-2">
+                    <button id="btnLeaveWorkspace" class="btn btn-outline-danger btn-sm" onclick="leaveCurrentWorkspace()">
+                        <i class="fa-solid fa-right-from-bracket"></i> Leave Workspace
+                    </button>
+                    <button id="btnDeleteWorkspace" style="display: none;" class="btn btn-danger btn-sm" onclick="deleteCurrentWorkspace()">
+                        <i class="fa-solid fa-trash"></i> Delete Workspace
+                    </button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- 4. Profile Modal -->
+    <div id="profileModal" class="modal-card glass hidden">
+        <div class="modal-header">
+            <h3><i class="fa-solid fa-user-gear text-gradient"></i> Profile Settings</h3>
+            <button class="btn-close-modal" onclick="closeAllModals()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <form onsubmit="handleUpdateProfile(event)">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="profileUsername">Username</label>
+                    <input type="text" id="profileUsername" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label for="profileEmail">Email</label>
+                    <input type="email" id="profileEmail" class="form-control" required readonly title="Email cannot be changed">
+                </div>
+                <div class="form-group">
+                    <label for="profileBio">Bio</label>
+                    <textarea id="profileBio" class="form-control" rows="2" placeholder="Tell us something about yourself..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer d-flex justify-content-between">
+                <button type="button" class="btn btn-danger btn-sm" onclick="handleDeleteAccount()">
+                    <i class="fa-regular fa-trash-can"></i> Delete Account
+                </button>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-outline" onclick="closeAllModals()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- 5. Custom URL Input Dialog -->
+    <div id="customUrlModal" class="modal-card glass hidden">
+        <div class="modal-header">
+            <h3>Custom API Server URL</h3>
+            <button class="btn-close-modal" onclick="closeAllModals()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label for="customUrlInput">Enter Full API Base URL (including `/api`):</label>
+                <input type="text" id="customUrlInput" class="form-control" placeholder="https://localhost:7139/api">
+                <small class="text-muted mt-1 d-block">Example: https://mydomain.com/api</small>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-outline" onclick="closeAllModals()">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="saveCustomUrl()">Save & Connect</button>
+        </div>
+    </div>
+
+
+    <!-- ==================== TOAST NOTIFICATIONS ==================== -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <!-- Custom JavaScript -->
+    <script type="module" src="app.js"></script>
+</body>
+</html>
